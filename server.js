@@ -1,0 +1,205 @@
+#!/usr/bin/env node
+/* ============================================================================
+   INFINITE FIGHT — servidor PvP online (sem dependências: só o Node.js 16+)
+
+   O que ele faz:
+     · serve o jogo (index.html, na mesma pasta) em  http://SEU-IP:3000
+     · mantém salas de 2 jogadores e repassa as mensagens de um para o outro (WebSocket em /ws)
+     · partida rápida (fila), sala com código de 4 letras, detecção de desconexão
+
+   Como usar:
+     node server.js                 (porta 3000)
+     PORT=8080 node server.js       (outra porta)
+
+   Jogar na mesma rede Wi-Fi: abra no celular/PC o endereço que aparece ao iniciar.
+   Jogar pela internet: hospede num serviço que rode Node (Render, Railway, Fly.io...) ou use um túnel
+   (ex.: cloudflared tunnel --url http://localhost:3000) e passe o link https para o amigo.
+   ========================================================================== */
+'use strict';
+const http = require('http'), fs = require('fs'), path = require('path'), os = require('os'), crypto = require('crypto'), zlib = require('zlib');
+
+const PORT = +process.env.PORT || 3000;
+const HOST = process.env.HOST || '0.0.0.0';
+const INDEX = process.env.INDEX || path.join(__dirname, 'index.html');
+const GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
+const MAX_FRAME = 16 * 1024;        // maior mensagem aceita (bytes)
+const RATE = 300;                   // mensagens por segundo por jogador (acima disso, descarta)
+const LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
+
+/* ---------- arquivos estáticos ---------- */
+let cache = { m: 0, raw: null, gz: null };
+function getIndex() {
+  const st = fs.statSync(INDEX);
+  if (st.mtimeMs !== cache.m) { cache.raw = fs.readFileSync(INDEX); cache.gz = zlib.gzipSync(cache.raw, { level: 6 }); cache.m = st.mtimeMs; }
+  return cache;
+}
+
+const rooms = new Map();   // código -> { code, p:[peerA, peerB] }
+const queue = [];          // fila da partida rápida
+const peers = new Set();
+
+const server = http.createServer((req, res) => {
+  const url = req.url.split('?')[0];
+  if (url === '/' || url === '/index.html') {
+    try {
+      const c = getIndex(), gz = /\bgzip\b/.test(req.headers['accept-encoding'] || '');
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', ...(gz ? { 'Content-Encoding': 'gzip' } : {}) });
+      res.end(gz ? c.gz : c.raw);
+    } catch (e) { res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }); res.end('index.html não encontrado ao lado do server.js'); }
+  } else if (url === '/health' || url === '/status') {
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+    res.end(JSON.stringify({ ok: true, players: peers.size, rooms: rooms.size, queue: queue.length }));
+  } else { res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }); res.end('404'); }
+});
+
+/* ---------- WebSocket mínimo (RFC 6455): texto, ping/pong, close, fragmentação ---------- */
+function frame(op, payload) {
+  const p = Buffer.isBuffer(payload) ? payload : Buffer.from(payload || '');
+  const n = p.length; let h;
+  if (n < 126) h = Buffer.from([0x80 | op, n]);
+  else if (n < 65536) { h = Buffer.alloc(4); h[0] = 0x80 | op; h[1] = 126; h.writeUInt16BE(n, 2); }
+  else { h = Buffer.alloc(10); h[0] = 0x80 | op; h[1] = 127; h.writeUInt32BE(0, 2); h.writeUInt32BE(n, 6); }
+  return Buffer.concat([h, p]);
+}
+
+let nextId = 1;
+class Peer {
+  constructor(sock) {
+    this.sock = sock; this.id = nextId++; this.buf = Buffer.alloc(0); this.parts = []; this.partLen = 0;
+    this.room = null; this.role = -1; this.name = 'Jogador'; this.alive = true; this.closed = false;
+    this.tok = RATE; this.tl = Date.now();
+    sock.setNoDelay(true); sock.setKeepAlive(true, 20000);
+    sock.on('data', d => this.onData(d));
+    sock.on('close', () => this.onClose());
+    sock.on('error', () => { try { sock.destroy(); } catch (e) {} });
+    peers.add(this);
+    this.send({ t: 'hi', id: this.id });
+  }
+  send(o) { if (this.closed) return; try { this.sock.write(frame(0x1, JSON.stringify(o))); } catch (e) {} }
+  close(code = 1000) {
+    if (this.closed) return;
+    try { const b = Buffer.alloc(2); b.writeUInt16BE(code); this.sock.write(frame(0x8, b)); this.sock.end(); } catch (e) {}
+    setTimeout(() => { try { this.sock.destroy(); } catch (e) {} }, 500);
+  }
+  onData(d) {
+    this.buf = Buffer.concat([this.buf, d]);
+    if (this.buf.length > MAX_FRAME * 4) return this.close(1009);
+    for (;;) {
+      const b = this.buf; if (b.length < 2) return;
+      const fin = !!(b[0] & 0x80), op = b[0] & 0x0f, masked = !!(b[1] & 0x80);
+      let len = b[1] & 0x7f, off = 2;
+      if (len === 126) { if (b.length < 4) return; len = b.readUInt16BE(2); off = 4; }
+      else if (len === 127) { if (b.length < 10) return; if (b.readUInt32BE(2)) return this.close(1009); len = b.readUInt32BE(6); off = 10; }
+      if (!masked) return this.close(1002);                 // o cliente é obrigado a mascarar
+      if (len > MAX_FRAME) return this.close(1009);
+      if (b.length < off + 4 + len) return;
+      const mask = b.subarray(off, off + 4), pay = Buffer.from(b.subarray(off + 4, off + 4 + len));
+      for (let i = 0; i < len; i++) pay[i] ^= mask[i & 3];
+      this.buf = b.subarray(off + 4 + len);
+      this.onFrame(fin, op, pay);
+      if (this.closed) return;
+    }
+  }
+  onFrame(fin, op, pay) {
+    if (op === 0x8) { this.close(1000); return; }
+    if (op === 0x9) { try { this.sock.write(frame(0xA, pay)); } catch (e) {} return; }
+    if (op === 0xA) { this.alive = true; return; }
+    if (op === 0x1 || op === 0x0) {
+      if (op === 0x1) { this.parts = []; this.partLen = 0; }
+      this.parts.push(pay); this.partLen += pay.length;
+      if (this.partLen > MAX_FRAME) return this.close(1009);
+      if (fin) { const s = Buffer.concat(this.parts).toString('utf8'); this.parts = []; this.partLen = 0; this.onText(s); }
+    }
+  }
+  onText(s) {
+    const n = Date.now(); this.tok = Math.min(RATE, this.tok + (n - this.tl) * RATE / 1000); this.tl = n;
+    if (this.tok < 1) return; this.tok--;
+    let m; try { m = JSON.parse(s); } catch (e) { return; }
+    if (!m || typeof m.t !== 'string') return;
+    if (typeof m.name === 'string') this.name = m.name.replace(/[^\p{L}\p{N} _.-]/gu, '').slice(0, 12) || 'Jogador';
+    switch (m.t) {
+      case 'm': {                                           // repasse para o oponente
+        const r = this.room; if (!r) return; const o = r.p[1 - this.role];
+        if (o) o.send({ t: 'm', d: m.d });
+        break;
+      }
+      case 'ping': this.send({ t: 'pong', ts: m.ts }); break;
+      case 'create': createRoom(this); break;
+      case 'join': joinRoom(this, String(m.code || '').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4)); break;
+      case 'quick': quick(this); break;
+      case 'leave': leave(this, true); break;
+    }
+  }
+  onClose() { if (this.closed) return; this.closed = true; peers.delete(this); leave(this, true); log('saiu #' + this.id, '(' + peers.size + ' online)'); }
+}
+
+/* ---------- salas e fila ---------- */
+function newCode() {
+  for (let i = 0; i < 80; i++) { let c = ''; for (let j = 0; j < 4; j++) c += LETTERS[crypto.randomInt(LETTERS.length)]; if (!rooms.has(c)) return c; }
+  return null;
+}
+function announce(r) {
+  const names = [r.p[0] ? r.p[0].name : '', r.p[1] ? r.p[1].name : ''];
+  r.p.forEach((q, i) => q && q.send({ t: 'room', code: r.code, role: i, n: r.p[1] ? 2 : 1, names }));
+}
+function leave(p, notify) {
+  const qi = queue.indexOf(p); if (qi >= 0) queue.splice(qi, 1);
+  const r = p.room; if (!r) return;
+  rooms.delete(r.code);
+  const o = r.p[1 - p.role]; p.room = null; p.role = -1;
+  if (o) { o.room = null; o.role = -1; if (notify) o.send({ t: 'left' }); }
+  log('sala ' + r.code + ' encerrada');
+}
+function createRoom(p) {
+  leave(p, true);
+  const code = newCode(); if (!code) return p.send({ t: 'err', m: 'Servidor cheio. Tente de novo.' });
+  const r = { code, p: [p, null] }; rooms.set(code, r); p.room = r; p.role = 0; announce(r);
+  log('sala ' + code + ' criada por ' + p.name);
+}
+function joinRoom(p, code) {
+  leave(p, true);
+  const r = rooms.get(code);
+  if (!r) return p.send({ t: 'err', m: 'Sala não encontrada.' });
+  if (r.p[1]) return p.send({ t: 'err', m: 'Essa sala já está cheia.' });
+  r.p[1] = p; p.room = r; p.role = 1; announce(r);
+  log('sala ' + code + ': ' + r.p[0].name + ' x ' + p.name);
+}
+function quick(p) {
+  leave(p, true);
+  while (queue.length) {
+    const w = queue.shift();
+    if (w === p || w.closed) continue;
+    const code = newCode(); if (!code) return p.send({ t: 'err', m: 'Servidor cheio. Tente de novo.' });
+    const r = { code, p: [w, p] }; rooms.set(code, r); w.room = r; w.role = 0; p.room = r; p.role = 1; announce(r);
+    log('partida rápida ' + code + ': ' + w.name + ' x ' + p.name);
+    return;
+  }
+  queue.push(p); p.send({ t: 'q' });
+}
+
+server.on('upgrade', (req, sock) => {
+  if (req.url.split('?')[0] !== '/ws' || String(req.headers.upgrade).toLowerCase() !== 'websocket' || !req.headers['sec-websocket-key']) { sock.destroy(); return; }
+  const acc = crypto.createHash('sha1').update(req.headers['sec-websocket-key'] + GUID).digest('base64');
+  sock.write('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ' + acc + '\r\n\r\n');
+  const p = new Peer(sock);
+  log('entrou #' + p.id, '(' + peers.size + ' online)');
+});
+
+// batimento: derruba conexões mortas
+setInterval(() => {
+  for (const p of peers) {
+    if (!p.alive) { try { p.sock.destroy(); } catch (e) {} continue; }
+    p.alive = false;
+    try { p.sock.write(frame(0x9, '')); } catch (e) {}
+  }
+}, 20000).unref();
+
+server.listen(PORT, HOST, () => {
+  console.log('\n  INFINITE FIGHT — servidor PvP rodando na porta ' + PORT + '\n');
+  console.log('  Neste computador:   http://localhost:' + PORT);
+  for (const list of Object.values(os.networkInterfaces()))
+    for (const a of list || []) if (a.family === 'IPv4' && !a.internal) console.log('  Mesma rede Wi-Fi:   http://' + a.address + ':' + PORT);
+  try { getIndex(); } catch (e) { console.log('\n  ATENÇÃO: coloque o index.html do jogo na mesma pasta do server.js.'); }
+  console.log('\n  (Ctrl+C para parar)\n');
+});
