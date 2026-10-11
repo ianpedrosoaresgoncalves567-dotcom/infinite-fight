@@ -49,7 +49,7 @@ const server = http.createServer((req, res) => {
     } catch (e) { res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }); res.end('index.html não encontrado ao lado do server.js'); }
   } else if (url === '/health' || url === '/status') {
     res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
-    res.end(JSON.stringify({ ok: true, players: peers.size, rooms: rooms.size, queue: queue.length }));
+    res.end(JSON.stringify({ ok: true, players: peers.size, rooms: rooms.size, queue: queue.length, chaos: chaos.size }));
   } else { res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }); res.end('404'); }
 });
 
@@ -124,6 +124,9 @@ class Peer {
         if (o) o.send({ t: 'm', d: m.d });
         break;
       }
+      case 'cj': chaosJoin(this, m); break;
+      case 'cm': { if (!this.cx) return; const o = { t: 'cm', f: this.cx.pid, d: m.d }, str = JSON.stringify(o); for (const q of chaos.values()) if (q !== this && !q.closed) { try { q.sock.write(frame(0x1, str)); } catch (e) {} } break; }
+      case 'ck': chaosKill(this, m); break;
       case 'ping': this.send({ t: 'pong', ts: m.ts }); break;
       case 'create': createRoom(this); break;
       case 'join': joinRoom(this, String(m.code || '').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4)); break;
@@ -131,7 +134,7 @@ class Peer {
       case 'leave': leave(this, true); break;
     }
   }
-  onClose() { if (this.closed) return; this.closed = true; peers.delete(this); leave(this, true); log('saiu #' + this.id, '(' + peers.size + ' online)'); }
+  onClose() { if (this.closed) return; this.closed = true; peers.delete(this); chaosLeave(this); leave(this, true); log('saiu #' + this.id, '(' + peers.size + ' online)'); }
 }
 
 /* ---------- salas e fila ---------- */
@@ -177,6 +180,42 @@ function quick(p) {
   }
   queue.push(p); p.send({ t: 'q' });
 }
+
+/* ---------- MODO CHAOS: sala única de até 12 jogadores, pontos salvos por "conta" (token do aparelho) ---------- */
+const CHAOS_MAX = 12, chaos = new Map(); let cpid = 0;
+const SCORE_FILE = path.join(process.env.DATA_DIR || __dirname, 'scores.json');
+let scores = {}; try { scores = JSON.parse(fs.readFileSync(SCORE_FILE, 'utf8')); } catch (e) {}
+let scoresDirty = false;
+setInterval(() => { if (scoresDirty) { scoresDirty = false; try { fs.writeFileSync(SCORE_FILE, JSON.stringify(scores)); } catch (e) {} } }, 15000).unref();
+function chaosJoin(p, m) {
+  leave(p, true); chaosLeave(p);
+  if (chaos.size >= CHAOS_MAX) return p.send({ t: 'err', m: 'O Chaos está lotado (' + CHAOS_MAX + ' jogadores). Tente de novo em instantes.' });
+  const acc = String(m.acc || '').replace(/[^a-zA-Z0-9]/g, '').slice(0, 32) || ('g' + p.id);
+  const rec = scores[acc] || (scores[acc] = { name: p.name, pts: 0, kills: 0 });
+  const rep = Math.max(0, Math.min(1e7, +m.pts || 0)); if (rep > rec.pts) rec.pts = rep;     // o total salvo no aparelho também vale
+  rec.name = p.name; scoresDirty = true;
+  p.cx = { pid: ++cpid, acc, ch: String(m.ch || 'fisch').replace(/[^a-z]/g, '').slice(0, 12) || 'fisch', lk: 0 }; chaos.set(p.cx.pid, p);
+  const list = [...chaos.values()].filter(q => q !== p).map(q => ({ id: q.cx.pid, name: q.name, ch: q.cx.ch, pts: scores[q.cx.acc].pts }));
+  p.send({ t: 'cw', me: p.cx.pid, pts: rec.pts, players: list });
+  for (const q of chaos.values()) if (q !== p) q.send({ t: 'cn', p: { id: p.cx.pid, name: p.name, ch: p.cx.ch, pts: rec.pts } });
+  log('chaos: ' + p.name + ' entrou (' + chaos.size + ')');
+}
+function chaosLeave(p) {
+  if (!p.cx) return; chaos.delete(p.cx.pid);
+  for (const q of chaos.values()) q.send({ t: 'cl', id: p.cx.pid }); p.cx = null;
+}
+function chaosKill(p, m) {                         // p = a vítima informa quem a derrubou (+10 pontos para o autor)
+  if (!p.cx) return; const now = Date.now(); if (now - p.cx.lk < 2500) return; p.cx.lk = now;
+  const k = chaos.get(m.k | 0);
+  if (k && k !== p && k.cx) { const rec = scores[k.cx.acc]; rec.pts += 10; rec.kills = (rec.kills || 0) + 1; scoresDirty = true; }
+  for (const q of chaos.values()) q.send({ t: 'ck', k: k && k !== p ? k.cx.pid : 0, v: p.cx.pid, kn: k ? k.name : '', vn: p.name, pts: k && k !== p && q === k ? scores[k.cx.acc].pts : undefined });
+}
+setInterval(() => {
+  if (!chaos.size) return;
+  const top = Object.values(scores).sort((a, b) => b.pts - a.pts).slice(0, 10).map(r => [r.name, r.pts]);
+  const on = [...chaos.values()].map(q => ({ id: q.cx.pid, pts: scores[q.cx.acc].pts }));
+  for (const q of chaos.values()) q.send({ t: 'lb', top, on });
+}, 3000).unref();
 
 server.on('upgrade', (req, sock) => {
   if (req.url.split('?')[0] !== '/ws' || String(req.headers.upgrade).toLowerCase() !== 'websocket' || !req.headers['sec-websocket-key']) { sock.destroy(); return; }
