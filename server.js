@@ -49,7 +49,7 @@ const server = http.createServer((req, res) => {
     } catch (e) { res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }); res.end('index.html não encontrado ao lado do server.js'); }
   } else if (url === '/health' || url === '/status') {
     res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
-    res.end(JSON.stringify({ ok: true, players: peers.size, rooms: rooms.size, queue: queue.length, chaos: chaos.size }));
+    res.end(JSON.stringify({ ok: true, players: peers.size, rooms: rooms.size, queue: queue.length, chaos: chaos.size, teams: troom.size, db: USE_DB ? dbOk : false }));
   } else { res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }); res.end('404'); }
 });
 
@@ -125,6 +125,9 @@ class Peer {
         break;
       }
       case 'cj': chaosJoin(this, m); break;
+      case 'tc': tJoin(this, m, true); break;
+      case 'tj': tJoin(this, m, false); break;
+      case 'tt': case 'ts': case 'tm': case 'tk': case 'tl': tMsg(this, m); break;
       case 'cm': { if (!this.cx) return; const o = { t: 'cm', f: this.cx.pid, d: m.d }, str = JSON.stringify(o); for (const q of chaos.values()) if (q !== this && !q.closed) { try { q.sock.write(frame(0x1, str)); } catch (e) {} } break; }
       case 'ck': chaosKill(this, m); break;
       case 'ping': this.send({ t: 'pong', ts: m.ts }); break;
@@ -134,7 +137,7 @@ class Peer {
       case 'leave': leave(this, true); break;
     }
   }
-  onClose() { if (this.closed) return; this.closed = true; peers.delete(this); chaosLeave(this); leave(this, true); log('saiu #' + this.id, '(' + peers.size + ' online)'); }
+  onClose() { if (this.closed) return; this.closed = true; peers.delete(this); chaosLeave(this); tLeave(this); leave(this, true); log('saiu #' + this.id, '(' + peers.size + ' online)'); }
 }
 
 /* ---------- salas e fila ---------- */
@@ -183,17 +186,40 @@ function quick(p) {
 
 /* ---------- MODO CHAOS: sala única de até 12 jogadores, pontos salvos por "conta" (token do aparelho) ---------- */
 const CHAOS_MAX = 12, chaos = new Map(); let cpid = 0;
+/* ---- placar salvo de verdade: banco Upstash Redis (plano grátis) via REST; sem as variáveis, cai para arquivo (que some no Render grátis) ---- */
 const SCORE_FILE = path.join(process.env.DATA_DIR || __dirname, 'scores.json');
-let scores = {}; try { scores = JSON.parse(fs.readFileSync(SCORE_FILE, 'utf8')); } catch (e) {}
-let scoresDirty = false;
-setInterval(() => { if (scoresDirty) { scoresDirty = false; try { fs.writeFileSync(SCORE_FILE, JSON.stringify(scores)); } catch (e) {} } }, 15000).unref();
+const DB_URL = (process.env.UPSTASH_REDIS_REST_URL || '').replace(/\/+$/, ''), DB_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN || '', USE_DB = !!(DB_URL && DB_TOKEN);
+let scores = {}, scoresReady = !USE_DB, dbOk = false, flushing = false, flushErrAt = 0; const dirty = new Set();
+async function dbCmd(cmd) {
+  const r = await fetch(DB_URL, { method: 'POST', headers: { Authorization: 'Bearer ' + DB_TOKEN, 'Content-Type': 'application/json' }, body: JSON.stringify(cmd) });
+  const j = await r.json(); if (!r.ok || j.error) throw new Error(j.error || ('HTTP ' + r.status)); return j.result;
+}
+async function loadScores() {
+  if (!USE_DB) { try { scores = JSON.parse(fs.readFileSync(SCORE_FILE, 'utf8')); } catch (e) {} log('AVISO: sem banco configurado — os pontos do Chaos podem sumir quando o servidor reiniciar.'); return; }
+  for (let i = 1; i <= 5; i++) {
+    try { const flat = await dbCmd(['HGETALL', 'scores']) || []; for (let k = 0; k + 1 < flat.length; k += 2) { try { scores[flat[k]] = JSON.parse(flat[k + 1]); } catch (e) {} } dbOk = true; scoresReady = true; log('placar carregado do banco (' + Object.keys(scores).length + ' contas)'); return; }
+    catch (e) { log('banco indisponível (' + e.message + '), tentativa ' + i + '/5'); await new Promise(r => setTimeout(r, 2000 * i)); }
+  }
+  scoresReady = true; log('ERRO: não consegui ler o banco; seguindo só com a memória (os pontos novos ainda tentam ser salvos).');
+}
+async function flushScores() {
+  if (flushing || !dirty.size) return; flushing = true; const accs = [...dirty]; dirty.clear();
+  try {
+    if (USE_DB) { const args = ['HSET', 'scores']; for (const a of accs) if (scores[a]) args.push(a, JSON.stringify(scores[a])); if (args.length > 2) await dbCmd(args); dbOk = true; }
+    else fs.writeFileSync(SCORE_FILE, JSON.stringify(scores));
+  } catch (e) { for (const a of accs) dirty.add(a); if (Date.now() - flushErrAt > 60000) { flushErrAt = Date.now(); log('ERRO ao salvar placar: ' + e.message); } }
+  flushing = false;
+}
+setInterval(flushScores, +process.env.FLUSH_MS || 10000).unref();
+for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, async () => { try { await flushScores(); } catch (e) {} process.exit(0); });   // o Render avisa antes de reiniciar: salva na hora
 function chaosJoin(p, m) {
   leave(p, true); chaosLeave(p);
+  if (!scoresReady) return p.send({ t: 'err', m: 'O servidor está iniciando. Tente de novo em alguns segundos.' });
   if (chaos.size >= CHAOS_MAX) return p.send({ t: 'err', m: 'O Chaos está lotado (' + CHAOS_MAX + ' jogadores). Tente de novo em instantes.' });
   const acc = String(m.acc || '').replace(/[^a-zA-Z0-9]/g, '').slice(0, 32) || ('g' + p.id);
-  const rec = scores[acc] || (scores[acc] = { name: p.name, pts: 0, kills: 0 });
-  const rep = Math.max(0, Math.min(1e7, +m.pts || 0)); if (rep > rec.pts) rec.pts = rep;     // o total salvo no aparelho também vale
-  rec.name = p.name; scoresDirty = true;
+  let rec = scores[acc];
+  if (!rec) { const first = Math.max(0, Math.min(3000, Math.floor(+m.pts || 0))); rec = scores[acc] = { name: p.name, pts: first, kills: 0 }; }   // 1ª vez da conta: aceita os pontos antigos do aparelho (até 3000); depois só o servidor conta
+  rec.name = p.name; dirty.add(acc);
   p.cx = { pid: ++cpid, acc, ch: String(m.ch || 'fisch').replace(/[^a-z]/g, '').slice(0, 12) || 'fisch', lk: 0 }; chaos.set(p.cx.pid, p);
   const list = [...chaos.values()].filter(q => q !== p).map(q => ({ id: q.cx.pid, name: q.name, ch: q.cx.ch, pts: scores[q.cx.acc].pts }));
   p.send({ t: 'cw', me: p.cx.pid, pts: rec.pts, players: list });
@@ -207,7 +233,7 @@ function chaosLeave(p) {
 function chaosKill(p, m) {                         // p = a vítima informa quem a derrubou (+10 pontos para o autor)
   if (!p.cx) return; const now = Date.now(); if (now - p.cx.lk < 2500) return; p.cx.lk = now;
   const k = chaos.get(m.k | 0);
-  if (k && k !== p && k.cx) { const rec = scores[k.cx.acc]; rec.pts += 10; rec.kills = (rec.kills || 0) + 1; scoresDirty = true; }
+  if (k && k !== p && k.cx) { const rec = scores[k.cx.acc]; rec.pts += 10; rec.kills = (rec.kills || 0) + 1; dirty.add(k.cx.acc); }
   for (const q of chaos.values()) q.send({ t: 'ck', k: k && k !== p ? k.cx.pid : 0, v: p.cx.pid, kn: k ? k.name : '', vn: p.name, pts: k && k !== p && q === k ? scores[k.cx.acc].pts : undefined });
 }
 setInterval(() => {
@@ -216,6 +242,54 @@ setInterval(() => {
   const on = [...chaos.values()].map(q => ({ id: q.cx.pid, pts: scores[q.cx.acc].pts }));
   for (const q of chaos.values()) q.send({ t: 'lb', top, on });
 }, 3000).unref();
+
+/* ---------- MODO EQUIPES: salas com código, 2 times (até 4 por time), vence quem chegar ao alvo de abates ou tiver mais no fim do tempo ---------- */
+const TEAM_MAX = 8, T_TARGET = +process.env.T_TARGET || 15, T_LIMIT = +process.env.T_LIMIT || 300, troom = new Map();
+function tNewCode() { for (let k = 0; k < 50; k++) { let c = ''; for (let i = 0; i < 4; i++) c += LETTERS[crypto.randomInt(LETTERS.length)]; if (!troom.has(c) && !rooms.has(c)) return c; } return null; }
+function tInfo(r, p) { return { t: 'tr', code: r.code, me: p.tm.pid, host: r.host, state: r.state, players: [...r.players.values()].map(q => ({ id: q.tm.pid, name: q.name, ch: q.tm.ch, team: q.tm.team })), score: r.score, target: T_TARGET, left: Math.max(0, Math.round((r.endsAt - Date.now()) / 1000)) }; }
+function tBroadcast(r) { for (const q of r.players.values()) q.send(tInfo(r, q)); }
+function tBalance(r) { let a = 0, b = 0; for (const q of r.players.values()) q.tm.team ? b++ : a++; return a <= b ? 0 : 1; }
+function tJoin(p, m, create) {
+  tLeave(p); leave(p, true); chaosLeave(p);
+  let r;
+  if (create) { const code = tNewCode(); if (!code) return p.send({ t: 'err', m: 'Servidor cheio' }); r = { code, players: new Map(), host: 0, state: 'lobby', score: [0, 0], endsAt: 0, nextPid: 1 }; troom.set(code, r); }
+  else { r = troom.get(String(m.code || '').toUpperCase().trim()); if (!r) return p.send({ t: 'err', m: 'Sala de equipes não encontrada' }); if (r.players.size >= TEAM_MAX) return p.send({ t: 'err', m: 'Sala cheia (máx. ' + TEAM_MAX + ')' }); }
+  const pid = r.nextPid++; p.tm = { room: r, pid, team: tBalance(r), ch: String(m.ch || 'fisch').replace(/[^a-z]/g, '').slice(0, 12) || 'fisch', lk: 0, k: 0, d: 0 };
+  r.players.set(pid, p); if (!r.host) r.host = pid; tBroadcast(r); log('equipes ' + r.code + ': ' + p.name + ' entrou (' + r.players.size + ')');
+}
+function tEnd(r, winner) {
+  if (r.state !== 'play') return; r.state = 'end';
+  const stats = [...r.players.values()].map(q => ({ id: q.tm.pid, name: q.name, team: q.tm.team, k: q.tm.k, d: q.tm.d }));
+  for (const q of r.players.values()) q.send({ t: 'te', winner, score: r.score, stats });
+}
+function tLeave(p) {
+  const tm = p.tm; if (!tm) return; const r = tm.room; r.players.delete(tm.pid); p.tm = null;
+  if (!r.players.size) { troom.delete(r.code); return; }
+  if (r.host === tm.pid) r.host = r.players.keys().next().value;
+  if (r.state === 'play') { const c = [0, 0]; for (const q of r.players.values()) c[q.tm.team]++; if (!c[0] || !c[1]) tEnd(r, c[0] ? 0 : 1); }
+  tBroadcast(r);
+}
+function tStart(r) {
+  r.state = 'play'; r.score = [0, 0]; r.endsAt = Date.now() + T_LIMIT * 1000;
+  for (const q of r.players.values()) { q.tm.k = 0; q.tm.d = 0; }
+  for (const q of r.players.values()) q.send(Object.assign(tInfo(r, q), { t: 'tstart' }));
+}
+function tMsg(p, m) {
+  const tm = p.tm; if (!tm) return; const r = tm.room;
+  switch (m.t) {
+    case 'tt': { if (r.state === 'play') return; const want = m.team ? 1 : 0; let n = 0; for (const q of r.players.values()) if (q.tm.team === want) n++; if (n >= TEAM_MAX / 2 || tm.team === want) return; tm.team = want; tBroadcast(r); break; }
+    case 'ts': { if (r.host !== tm.pid || r.state === 'play') return; const c = [0, 0]; for (const q of r.players.values()) c[q.tm.team]++; if (!c[0] || !c[1]) return p.send({ t: 'err', m: 'Precisa de pelo menos 1 jogador em cada time.' }); tStart(r); break; }
+    case 'tm': { if (r.state !== 'play') return; const str = JSON.stringify({ t: 'tm', f: tm.pid, d: m.d }); for (const q of r.players.values()) if (q !== p && !q.closed) { try { q.sock.write(frame(0x1, str)); } catch (e) {} } break; }
+    case 'tk': {                                   // a vítima informa quem a derrubou
+      if (r.state !== 'play') return; const now = Date.now(); if (now - tm.lk < 2500) return; tm.lk = now; tm.d++;
+      const k = r.players.get(m.k | 0); let ok = k && k !== p && k.tm.team !== tm.team;
+      if (ok) { k.tm.k++; r.score[k.tm.team]++; }
+      for (const q of r.players.values()) q.send({ t: 'tk', k: ok ? k.tm.pid : 0, v: tm.pid, kn: ok ? k.name : '', vn: p.name, sc: r.score });
+      if (ok && r.score[k.tm.team] >= T_TARGET) tEnd(r, k.tm.team); break; }
+    case 'tl': tLeave(p); break;
+  }
+}
+setInterval(() => { const now = Date.now(); for (const r of troom.values()) if (r.state === 'play' && now >= r.endsAt) tEnd(r, r.score[0] > r.score[1] ? 0 : r.score[1] > r.score[0] ? 1 : -1); }, 1000).unref();
 
 server.on('upgrade', (req, sock) => {
   if (req.url.split('?')[0] !== '/ws' || String(req.headers.upgrade).toLowerCase() !== 'websocket' || !req.headers['sec-websocket-key']) { sock.destroy(); return; }
@@ -234,6 +308,7 @@ setInterval(() => {
   }
 }, 20000).unref();
 
+loadScores();
 server.listen(PORT, HOST, () => {
   console.log('\n  INFINITE FIGHT — servidor PvP rodando na porta ' + PORT + '\n');
   console.log('  Neste computador:   http://localhost:' + PORT);
