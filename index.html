@@ -1744,6 +1744,90 @@ $('pb').onclick=()=>G.pause();$('res').onclick=()=>G.pause(false);$('pmenu').onc
 $('mt').onclick=()=>{Snd.on=!Snd.on;Snd.apply();$('mt').textContent=Snd.on?'🔊':'🔇'};
 $('sm').oninput=e=>{Snd.mv=e.target.value/100;Snd.apply()};$('ss').oninput=e=>{Snd.sv=e.target.value/100;Snd.apply()};$('sbz').oninput=e=>document.body.style.setProperty('--bs',e.target.value/100);
 addEventListener('pointerdown',()=>{Snd.init();try{YA.url()}catch(e){}});addEventListener('keydown',()=>Snd.init());
+/* ===== CIDADE DO CAOS · Etapa 2: cidade explorável, colisões e 3 interiores =====
+   · só vale no Chaos livre (o modo Equipes continua exatamente igual)
+   · a cidade nasce de uma semente fixa: todos os aparelhos montam a MESMA cidade, sem mandar nada pela rede
+   · interiores = salas numa faixa do mesmo mapa (y >= 2200). A posição do jogador já diz em que lugar ele está,
+     então o multiplayer não precisou mudar: quem está em outro lugar simplesmente não é desenhado
+   · tudo entra "embrulhando" funções que já existem (mesmo estilo do resto do arquivo) */
+const CITY=(()=>{
+ const me={on:false},CW=2800,CHT=1800,BAND=2200,TOT=2800,RD=140,BW=545,BH=440,X0=100,Y0=100,M=26;
+ let sd=20261031;const rr=()=>{sd=sd+0x6D2B79F5|0;let t=Math.imul(sd^sd>>>15,1|sd);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296};
+ // distritos (linha x coluna): R residencial · C comercial · I industrial · A abandonado · P praça
+ const DIS=[['R','R','C','R'],['A','P','C','I'],['A','A','I','I']],COL={R:['#7a5c4a','#6b4f5a','#5a6b57','#8a7a5a'],C:['#3f5b8f','#7f3f6b','#2f7f7a','#8f6a2f'],I:['#4a4f58','#454b55'],A:['#3b3834','#34322e','#403a33']};
+ const BL=[],B=[],S=[],ENT=[];   // quarteirões, construções, sólidos (tudo que bloqueia), construções com porta
+ const mk=(x,y,w,h,k,col)=>{const b={x,y,w,h,k,col,cr:[]};if(k==='r')for(let i=0;i<4;i++)b.cr.push([x+rr()*w,y+rr()*h,x+rr()*w,y+rr()*h]);B.push(b);S.push(b);return b};
+ for(let r=0;r<3;r++)for(let c=0;c<4;c++){const d=DIS[r][c],bx=X0+c*(BW+RD),by=Y0+r*(BH+RD);BL.push({x:bx,y:by,w:BW,h:BH,d});
+  if(d==='R'||d==='C'){const w=d==='R'?226:230,h=d==='R'?150:170;for(let i=0;i<2;i++)for(let j=0;j<2;j++){const b=mk(bx+M+i*(BW-2*M-w),by+M+j*(BH-2*M-h),w,h,d==='R'?'h':'s',COL[d][(r+c+i+j)%4]);if(j===1&&i===0&&r===0&&(c===0||c===2))ENT.push(b)}}
+  else if(d==='I'){for(let j=0;j<2;j++){const b=mk(bx+M,by+M+j*(BH-2*M-170),BW-2*M,170,'w',COL.I[j]);if(r===1&&c===3&&j===1)ENT.push(b)}}
+  else if(d==='A'){mk(bx+30,by+30,200,150,'r',COL.A[0]);mk(bx+300,by+60,200,120,'r',COL.A[1]);mk(bx+120,by+250,300,150,'r',COL.A[2]);S.push({x:bx+450,y:by+300,w:50,h:40},{x:bx+40,y:by+215,w:40,h:24})}
+  else{S.push({x:bx+BW/2-40,y:by+BH/2-40,w:80,h:80,fo:1});for(const[ox,oy]of[[60,60],[BW-96,60],[60,BH-96],[BW-96,BH-96]])S.push({x:bx+ox,y:by+oy,w:36,h:36,pi:1})}}
+ S.push({x:0,y:CHT,w:CW,h:410,wl:1});   // parede do fundo da cidade (separa a cidade da faixa dos interiores)
+ // interiores: [x, y, largura, altura, cor do piso]; móveis: [dx, dy, w, h, cor, emoji]
+ const NM=['CASA','LOJA','GALPÃO'],RM=[[150,2250,620,400,'#4a3a2e'],[950,2250,620,400,'#2e3a4a'],[1750,2250,900,440,'#33353b']];
+ const FUR=[[[36,36,130,90,'#5c4a7a','🛏'],[260,150,140,90,'#6b4a2f','🍽'],[430,40,150,60,'#3f5b8f','🛋'],[36,250,70,120,'#777','🍳']],
+  [[220,60,180,50,'#7a5a2f','🧾'],[40,170,160,36,'#556','📦'],[40,250,160,36,'#556','📦'],[420,170,160,36,'#556','📦'],[420,250,160,36,'#556','📦']],
+  [[60,60,90,90,'#7a5a2f','📦'],[150,60,90,90,'#6b4a2f','📦'],[60,150,90,90,'#6b4a2f','📦'],[650,70,120,100,'#7a5a2f','📦'],[740,170,100,100,'#6b4a2f','📦'],[300,50,300,40,'#556','🗄'],[300,250,300,40,'#556','🗄']]];
+ const R=RM.map((a,i)=>{const[x,y,w,h,fl]=a,q={x,y,w,h,fl,nm:NM[i],f:FUR[i].map(f=>({x:x+f[0],y:y+f[1],w:f[2],h:f[3],c:f[4],e:f[5]}))};
+  q.wl=[{x:x-40,y:y-40,w:w+80,h:40},{x:x-40,y:y+h,w:w+80,h:40},{x:x-40,y:y,w:40,h:h},{x:x+w,y:y,w:40,h:h}].map(o=>Object.assign(o,{wl:1}));S.push(...q.wl,...q.f);return q});
+ // portas (gatilhos): z=0 entra na construção (cidade), z=1 sai dela (interior)
+ const T=[];ENT.forEach((b,i)=>{const q=R[i],dx=b.x+b.w/2;b.door=i;
+  T.push({z:0,x:dx-26,y:b.y+b.h,w:52,h:10,px:q.x+q.w/2,py:q.y+q.h-90});
+  T.push({z:1,x:q.x+q.w/2-34,y:q.y+q.h-26,w:68,h:26,px:dx,py:b.y+b.h+56})});
+ const zn=y=>y>=BAND?1:0;   // 0 = cidade, 1 = dentro de uma construção
+
+ // empurra o jogador para fora de qualquer parede/objeto (também resolve teleportes que caíram dentro de algo)
+ const fix=p=>{for(let k=0;k<2;k++)for(const s of S){const nx=clamp(p.x,s.x,s.x+s.w),ny=clamp(p.y,s.y,s.y+s.h),dx=p.x-nx,dy=p.y-ny,d=Math.hypot(dx,dy);
+   if(d<p.r&&d>.001){const f=(p.r-d)/d;p.x+=dx*f;p.y+=dy*f}
+   else if(d<=.001){const l=p.x-s.x,rt=s.x+s.w-p.x,t=p.y-s.y,b=s.y+s.h-p.y,m=Math.min(l,rt,t,b);
+    if(m===l)p.x=s.x-p.r;else if(m===rt)p.x=s.x+s.w+p.r;else if(m===t)p.y=s.y-p.r;else p.y=s.y+s.h+p.r}}
+  p.x=clamp(p.x,AR.x+p.r,AR.x+AR.w-p.r);p.y=clamp(p.y,AR.y+p.r,AR.y+AR.h-p.r);
+  if(S.some(s=>{const dx=p.x-clamp(p.x,s.x,s.x+s.w),dy=p.y-clamp(p.y,s.y,s.y+s.h);return dx*dx+dy*dy<(p.r-1)*(p.r-1)})){   // ainda preso (cantinho entre móveis): leva para um ponto seguro
+   const q=zn(p.y)?R.find(o=>p.x>=o.x-40&&p.x<=o.x+o.w+40):null,pt=q?{x:q.x+q.w/2,y:q.y+q.h-90}:CHAOS.pick();p.x=pt.x;p.y=pt.y}};
+ // portas: encostar na porta atravessa (funciona igual no celular, sem botão novo)
+ const doors=()=>{const p=G.p;if(!p||(p.doorCd||0)>G.tm)return;const z=zn(p.y);
+  for(const t of T)if(t.z===z&&p.x>t.x-p.r-4&&p.x<t.x+t.w+p.r+4&&p.y>t.y-p.r-4&&p.y<t.y+t.h+p.r+4){
+   p.x=t.px;p.y=t.py;p.doorCd=G.tm+.6;G.cam.x=clamp(p.x-W/2,AR.x,AR.x+AR.w-W);G.cam.y=clamp(p.y-H/2,AR.y,AR.y+AR.h-H);FX.ring(p.x,p.y,'#fff',70);PVP.snap();break}};
+
+ /* ---- desenho (só o que aparece na câmera) ---- */
+ const vis=(r,c)=>r.x<c.x+W&&r.x+r.w>c.x&&r.y<c.y+H&&r.y+r.h>c.y,DT={h:'🏠',s:'🏪',w:'🏭'};
+ const drawB=b=>{const{x,y,w,h}=b;X.fillStyle=b.col;X.fillRect(x,y,w,h);X.fillStyle='rgba(0,0,0,.28)';X.fillRect(x+8,y+8,w-16,h-16);
+  X.strokeStyle='rgba(255,255,255,.1)';X.lineWidth=2;X.beginPath();
+  if(b.k==='h'){X.moveTo(x+8,y+h/2);X.lineTo(x+w-8,y+h/2)}
+  else if(b.k==='w'){for(let i=x+40;i<x+w;i+=40){X.moveTo(i,y+8);X.lineTo(i,y+h-8)}}
+  else if(b.k==='s'){for(let i=x+8;i<x+w-8;i+=22){X.moveTo(i,y+h-26);X.lineTo(i,y+h-8)}}
+  X.stroke();
+  if(b.k==='r'){X.strokeStyle='#0008';X.beginPath();for(const l of b.cr){X.moveTo(l[0],l[1]);X.lineTo(l[2],l[3])}X.stroke()}
+  X.strokeStyle='#000b';X.lineWidth=3;X.strokeRect(x,y,w,h);
+  if(b.door!==undefined){const dx=x+w/2;X.fillStyle='#ffd23f';X.fillRect(dx-22,y+h-5,44,8);X.font='26px sans-serif';X.textAlign='center';X.textBaseline='middle';X.fillText(DT[b.k],dx,y+h/2)}};
+ const drawCity=c=>{X.fillStyle='#1a1d27';X.fillRect(0,0,CW,CHT);   // asfalto
+  for(const b of BL){if(!vis(b,c))continue;X.fillStyle=b.d==='A'?'#2a2926':b.d==='I'?'#2b2e36':b.d==='P'?'#26402f':'#303445';X.fillRect(b.x,b.y,b.w,b.h)}   // calçadas/quarteirões
+  X.strokeStyle='rgba(232,211,106,.35)';X.lineWidth=3;X.setLineDash([26,22]);X.beginPath();
+  for(let i=0;i<3;i++){const x=X0+i*(BW+RD)+BW+RD/2;X.moveTo(x,0);X.lineTo(x,CHT)}for(let j=0;j<2;j++){const y=Y0+j*(BH+RD)+BH+RD/2;X.moveTo(0,y);X.lineTo(CW,y)}X.stroke();X.setLineDash([]);
+  for(const s of S){if(s.k||s.wl||!vis(s,c))continue;if(s.fo){X.fillStyle='#2c6f9c';X.beginPath();X.arc(s.x+40,s.y+40,44,0,6.3);X.fill();X.strokeStyle='#9ad';X.lineWidth=4;X.stroke()}else{X.fillStyle=s.pi?'#2f6a3a':'#4a4742';X.fillRect(s.x,s.y,s.w,s.h);X.strokeStyle='#000a';X.lineWidth=2;X.strokeRect(s.x,s.y,s.w,s.h)}}
+  for(const b of B)if(vis(b,c))drawB(b);
+  X.strokeStyle='#ff2d55';X.lineWidth=8;X.strokeRect(0,0,CW,CHT)};
+ const drawIn=c=>{for(const q of R){if(!vis({x:q.x-40,y:q.y-40,w:q.w+80,h:q.h+80},c))continue;
+  X.fillStyle=q.fl;X.fillRect(q.x,q.y,q.w,q.h);X.strokeStyle='rgba(255,255,255,.05)';X.lineWidth=1;X.beginPath();
+  for(let x=q.x;x<=q.x+q.w;x+=40){X.moveTo(x,q.y);X.lineTo(x,q.y+q.h)}for(let y=q.y;y<=q.y+q.h;y+=40){X.moveTo(q.x,y);X.lineTo(q.x+q.w,y)}X.stroke();
+  X.textAlign='center';X.textBaseline='middle';X.fillStyle='rgba(255,255,255,.12)';X.font='bold 30px sans-serif';X.fillText(q.nm,q.x+q.w/2,q.y+q.h/2);
+  for(const f of q.f){X.fillStyle=f.c;X.fillRect(f.x,f.y,f.w,f.h);X.strokeStyle='#000a';X.lineWidth=2;X.strokeRect(f.x,f.y,f.w,f.h);X.font='22px sans-serif';X.fillStyle='#fff';X.fillText(f.e,f.x+f.w/2,f.y+f.h/2)}
+  for(const w of q.wl){X.fillStyle='#2b2f3d';X.fillRect(w.x,w.y,w.w,w.h)}
+  X.strokeStyle='#000';X.lineWidth=3;X.strokeRect(q.x,q.y,q.w,q.h);
+  X.fillStyle='#ffd23f';X.fillRect(q.x+q.w/2-34,q.y+q.h-4,68,8);X.font='bold 12px sans-serif';X.fillText('⬇ SAÍDA',q.x+q.w/2,q.y+q.h-36)}};
+
+ /* ---- ligações com o jogo existente (embrulhos) ---- */
+ const _bg=CHAOS.bg;CHAOS.bg=function(){if(!me.on)return _bg.call(this);const c=G.cam;X.fillStyle='#05060a';X.fillRect(c.x-10,c.y-10,W+20,H+20);if(G.p&&zn(G.p.y))drawIn(c);else drawCity(c)};
+ const _pk=CHAOS.pick;CHAOS.pick=function(){if(!me.on)return _pk.call(this);let best=null,bd=-1;   // nasce nas ruas, longe de paredes e dos outros jogadores da cidade
+  for(let i=0;i<30;i++){const x=rnd(60,CW-60),y=rnd(60,CHT-60);if(S.some(s=>x>s.x-30&&x<s.x+s.w+30&&y>s.y-30&&y<s.y+s.h+30))continue;let d=1e9;for(const rf of this.map.values())if(!rf.gone&&zn(rf.pl.y)===0)d=Math.min(d,Math.hypot(rf.pl.x-x,rf.pl.y-y));if(d>bd){bd=d;best={x,y}}}
+  return best||{x:70,y:70}};
+ const _bgn=CHAOS.begin;CHAOS.begin=function(pl){me.on=!G.team;_bgn.call(this,pl);if(me.on)AR.h=TOT};   // a arena ganha a faixa dos interiores
+ const _stp=CHAOS.stop;CHAOS.stop=function(){me.on=false;_stp.call(this)};
+ const _cs=CHAOS.step;CHAOS.step=function(dt){_cs.call(this,dt);if(me.on&&!this.dead)doors()};
+ const _pu=Player.prototype.update;Player.prototype.update=function(dt){_pu.call(this,dt);if(me.on&&this===PVP.me)fix(this)};
+ const _rd=RemoteFighter.prototype.draw;RemoteFighter.prototype.draw=function(){if(me.on&&G.p&&zn(this.pl.y)!==zn(G.p.y))return;_rd.call(this)};   // não vejo quem está em outro lugar
+ Object.assign(me,{S,B,R,T,ENT,fix,zn,doors,drawCity,drawIn,CW,CHT,TOT});return me})();
+
 let last=0;function loop(t){const dt=Math.min(.05,(t-last)/1000||0);last=t;if(G.run&&!G.paused&&!(IN.tc&&innerHeight>innerWidth))G.update(dt);G.draw();requestAnimationFrame(loop)}
 UI.menu();requestAnimationFrame(loop);
 </script>
