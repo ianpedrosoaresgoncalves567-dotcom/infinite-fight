@@ -944,7 +944,7 @@ const PVP={
    case 'err':this.status(m.m||'Erro.','err');break;
    case 'left':this.oppLeft();break;
    case 'pong':if(Number.isFinite(m.ts))this.ping=Math.round(performance.now()-m.ts);break;
-   case 'cw':case 'cn':case 'cl':case 'cm':case 'ck':case 'lb':CHAOS.onMsg(m);break;
+   case 'cw':case 'cn':case 'cl':case 'cm':case 'ck':case 'lb':case 'ev':CHAOS.onMsg(m);break;
    case 'tr':case 'tstart':case 'tk':case 'te':case 'tm':TEAM.onMsg(m);break;
    case 'm':this.onGame(m.d);break;
   }},
@@ -1751,7 +1751,7 @@ addEventListener('pointerdown',()=>{Snd.init();try{YA.url()}catch(e){}});addEven
      então o multiplayer não precisou mudar: quem está em outro lugar simplesmente não é desenhado
    · tudo entra "embrulhando" funções que já existem (mesmo estilo do resto do arquivo) */
 const CITY=(()=>{
- const me={on:false},CW=2800,CHT=1800,BAND=2200,TOT=2800,RD=140,BW=545,BH=440,X0=100,Y0=100,M=26;
+ const me={on:false},CW=2800,CHT=1800,BAND=2200,TOT=3500,RD=140,BW=545,BH=440,X0=100,Y0=100,M=26;
  let sd=20261031;const rr=()=>{sd=sd+0x6D2B79F5|0;let t=Math.imul(sd^sd>>>15,1|sd);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296};
  // distritos (linha x coluna): R residencial · C comercial · I industrial · A abandonado · P praça
  const DIS=[['R','R','C','R'],['A','P','C','I'],['A','A','I','I']],COL={R:['#7a5c4a','#6b4f5a','#5a6b57','#8a7a5a'],C:['#3f5b8f','#7f3f6b','#2f7f7a','#8f6a2f'],I:['#4a4f58','#454b55'],A:['#3b3834','#34322e','#403a33']};
@@ -1783,7 +1783,7 @@ const CITY=(()=>{
     if(m===l)p.x=s.x-p.r;else if(m===rt)p.x=s.x+s.w+p.r;else if(m===t)p.y=s.y-p.r;else p.y=s.y+s.h+p.r}}
   p.x=clamp(p.x,AR.x+p.r,AR.x+AR.w-p.r);p.y=clamp(p.y,AR.y+p.r,AR.y+AR.h-p.r);
   if(S.some(s=>{const dx=p.x-clamp(p.x,s.x,s.x+s.w),dy=p.y-clamp(p.y,s.y,s.y+s.h);return dx*dx+dy*dy<(p.r-1)*(p.r-1)})){   // ainda preso (cantinho entre móveis): leva para um ponto seguro
-   const q=zn(p.y)?R.find(o=>p.x>=o.x-40&&p.x<=o.x+o.w+40):null,pt=q?{x:q.x+q.w/2,y:q.y+q.h-90}:CHAOS.pick();p.x=pt.x;p.y=pt.y}};
+   const q=zn(p.y)?R.find(o=>p.x>=o.x-40&&p.x<=o.x+o.w+40&&p.y>=o.y-40&&p.y<=o.y+o.h+40):null,pt=q?{x:q.x+q.w/2,y:q.y+q.h-90}:CHAOS.pick();p.x=pt.x;p.y=pt.y}};
  // portas: encostar na porta atravessa (funciona igual no celular, sem botão novo)
  const doors=()=>{const p=G.p;if(!p||(p.doorCd||0)>G.tm)return;const z=zn(p.y);
   for(const t of T)if(t.z===z&&p.x>t.x-p.r-4&&p.x<t.x+t.w+p.r+4&&p.y>t.y-p.r-4&&p.y<t.y+t.h+p.r+4){
@@ -1826,7 +1826,236 @@ const CITY=(()=>{
  const _cs=CHAOS.step;CHAOS.step=function(dt){_cs.call(this,dt);if(me.on&&!this.dead)doors()};
  const _pu=Player.prototype.update;Player.prototype.update=function(dt){_pu.call(this,dt);if(me.on&&this===PVP.me)fix(this)};
  const _rd=RemoteFighter.prototype.draw;RemoteFighter.prototype.draw=function(){if(me.on&&G.p&&zn(this.pl.y)!==zn(G.p.y))return;_rd.call(this)};   // não vejo quem está em outro lugar
- Object.assign(me,{S,B,R,T,ENT,fix,zn,doors,drawCity,drawIn,CW,CHT,TOT});return me})();
+ Object.assign(me,{S,B,R,T,ENT,BL,fix,zn,doors,drawCity,drawIn,CW,CHT,TOT});return me})();
+
+/* ===== EVENTOS GLOBAIS (Cidade do Caos · Etapa 3): aviso na tela, som e lista de eventos ativos =====
+   O servidor manda "ev start" e "ev end"; este bloco só mostra e guarda o estado. Quem decide é sempre o servidor.
+   Cada evento futuro registra seus efeitos em EVT.defs[id] = { start(e), end(e) }  (e.data vem do servidor). */
+const EVT=(()=>{
+ const me={act:new Map(),ban:null,defs:{}},COL={raro:'#4fd6ff',muito_raro:'#b07cff',lendario:'#ffd23f'},LAB={raro:'RARO',muito_raro:'MUITO RARO',lendario:'LENDÁRIO'};
+ me.clear=()=>{for(const e of me.act.values()){const d=me.defs[e.id];if(d&&d.end)d.end(e)}me.act.clear();me.ban=null};
+ me.add=(m,quiet)=>{if(!m||me.act.has(m.sid|0))return;   // mensagem repetida (mesmo sid) é ignorada
+  const e={sid:m.sid|0,id:String(m.id||''),cat:COL[m.cat]?m.cat:'raro',name:String(m.name||'EVENTO').slice(0,30),icon:String(m.icon||'✨').slice(0,4),end:performance.now()+Math.max(0,+m.left||0),dur:Math.max(0,+m.dur||0),data:m.data||{},live:m.live,got:Array.isArray(m.got)?m.got.map(Number):[]};e.t0=e.end-(e.dur||Math.max(0,+m.left||0));   // t0 = quando o evento começou (para quem entra no meio)
+  
+  me.act.set(e.sid,e);const d=me.defs[e.id];if(d&&d.start)d.start(e);
+  if(!quiet){me.ban={e,t:G.tm};Snd.sfx('aw');const l=e.cat==='lendario';G.flash=Math.max(G.flash||0,l?1:e.cat==='muito_raro'?.5:.25);G.shake=Math.max(G.shake||0,l?14:6);CHAOS.say('EVENTO '+LAB[e.cat]+': '+e.name)}};
+ me.rem=sid=>{const e=me.act.get(sid);if(!e)return;me.act.delete(sid);const d=me.defs[e.id];if(d&&d.end)d.end(e);CHAOS.say(e.name+' terminou')};
+ me.msg=m=>{if(m.a==='start')me.add(m);else if(m.a==='end')me.rem(m.sid|0);
+  else if(m.a==='got'){const e=me.act.get(m.sid|0);if(e&&!e.got.includes(m.i|0)){e.got.push(m.i|0);const d=me.defs[e.id];if(d&&d.got)d.got(e,m)}}   // alguém pegou uma recompensa
+  else if(m.a==='pts'&&Number.isFinite(m.pts)){CHAOS.pts=m.pts|0;CHAOS.save();FX.text(G.p.x,G.p.y-50,'+'+(m.n|0)+' PONTOS','#ffd23f',30,1);Snd.sfx('aw')}
+  else{const e=me.act.get(m.sid|0),d=e&&me.defs[e.id];if(d&&d.msg)d.msg(e,m)}};   // mensagens próprias de cada evento (ex.: falas e provas do Visitante)
+ me.sync=l=>{me.clear();if(Array.isArray(l))for(const m of l)me.add(m,true)};   // quem entra no meio já vê o que está acontecendo
+ me.hud=()=>{if(!me.act.size&&!me.ban)return;const n=performance.now();X.save();X.textBaseline='middle';X.lineJoin='round';let y=84;
+  for(const[k,e]of me.act){if(n>e.end+8000){me.act.delete(k);continue}   // segurança: some se o aviso de fim se perder
+   const s=Math.max(0,Math.ceil((e.end-n)/1000)),t=e.icon+' '+e.name+'  '+((s/60)|0)+':'+String(s%60).padStart(2,'0');
+   X.font='bold 13px sans-serif';X.textAlign='left';X.lineWidth=3;X.strokeStyle='#000';X.fillStyle=COL[e.cat];X.strokeText(t,14,y);X.fillText(t,14,y);y+=18}
+  const b=me.ban;if(b){const a=G.tm-b.t;if(a>5.5)me.ban=null;else{const k=Math.min(1,a*4,(5.5-a)*2),c=COL[b.e.cat];X.globalAlpha=Math.max(0,k);X.fillStyle='rgba(0,0,0,.72)';X.fillRect(W/2-250,96,500,78);X.strokeStyle=c;X.lineWidth=3;X.strokeRect(W/2-250,96,500,78);
+   X.textAlign='center';X.font='bold 14px sans-serif';X.fillStyle=c;X.fillText('⚠ EVENTO '+LAB[b.e.cat],W/2,114);X.font='bold 30px sans-serif';X.fillStyle='#fff';X.fillText(b.e.icon+' '+b.e.name,W/2,148)}}
+  X.restore()};
+ const _om=CHAOS.onMsg;CHAOS.onMsg=function(m){if(m.t==='ev'){if(this.on)me.msg(m);return}_om.call(this,m);if(m.t==='cw')me.sync(m.ev)};
+ const _hd=CHAOS.hud;CHAOS.hud=function(){_hd.call(this);me.hud()};
+ const _sp=CHAOS.stop;CHAOS.stop=function(){me.clear();_sp.call(this)};
+ return me})();
+
+/* ===== EVENTO: CHUVA DE FRAGMENTOS (cliente · Etapa 4) =====
+   O servidor manda o cronograma (onde e quando cada fragmento cai). Aqui: aviso no chão, impacto, zona perigosa e
+   recompensa. O dano é calculado no aparelho de quem está na zona (como no resto do jogo). Quem está dentro de uma
+   construção fica a salvo. Ao terminar o evento, tudo some porque só existe enquanto o evento está ativo. */
+(()=>{
+ const AO=e=>e.id==='fragmentos'&&e.fr,Z0=()=>!(typeof CITY!=='undefined'&&CITY.zn(G.p.y)),near=(f,p,r)=>Math.hypot(p.x-f.x,p.y-f.y)<r;
+ EVT.defs.fragmentos={start(e){const d=e.data||{};e.R=Math.min(150,+d.r||70);e.Wn=+d.warn||2200;e.Z=+d.zone||7000;e.RW=+d.rwMs||12000;
+   e.fr=(Array.isArray(d.frags)?d.frags:[]).slice(0,40).map((f,i)=>({x:+f.x||0,y:+f.y||0,t:+f.t||0,rw:f.rw?1:0,im:0,tk:0,cl:0,got:e.got.includes(i)?1:0}))}};
+ const impact=(e,f)=>{const p=G.p;if(!p||!Z0())return;const d=Math.hypot(p.x-f.x,p.y-f.y),c=f.rw?'#ffd23f':'#b07cff';
+  FX.ring(f.x,f.y,c,e.R*1.7);P.add(f.x,f.y,c,12,280,.6,5);if(d<700){G.shake=Math.max(G.shake||0,Math.max(3,12-d/70));Snd.sfx('boom')}
+  if(d<e.R+p.r*.5&&!CHAOS.dead)p.hurt(p.mh*.15)};   // impacto direto: 15% da vida
+ const step=(e,dt)=>{const el=performance.now()-e.t0,p=G.p;
+  for(let i=0;i<e.fr.length;i++){const f=e.fr[i];
+   if(!f.im&&el>=f.t){f.im=1;if(el<f.t+1500)impact(e,f)}   // quem entra no meio não vê impactos antigos
+   if(!p||CHAOS.dead||!Z0())continue;
+   if(f.im&&el<f.t+e.Z&&near(f,p,e.R+p.r*.5)){f.tk-=dt;if(f.tk<=0){f.tk=.5;p.hurt(p.mh*.04);FX.ring(p.x,p.y,'#b07cff',34)}}   // zona: 4% da vida a cada meio segundo
+   if(f.rw&&f.im&&!f.got&&!f.cl&&el>=f.t+400&&el<f.t+e.RW&&near(f,p,p.r+26)){f.cl=1;PVP.send({t:'evc',sid:e.sid,i})}}};   // pede a recompensa ao servidor
+ const draw=e=>{if(!G.p||!Z0())return;const el=performance.now()-e.t0,c=G.cam,tt=G.tm;
+  for(const f of e.fr){if(f.x<c.x-200||f.x>c.x+W+200||f.y<c.y-200||f.y>c.y+H+200)continue;const col=f.rw?'255,210,63':'176,124,255';
+   if(el>=f.t-e.Wn&&el<f.t){const k=(el-(f.t-e.Wn))/e.Wn;X.fillStyle='rgba(255,60,60,'+(.08+.14*k)+')';X.beginPath();X.arc(f.x,f.y,e.R,0,6.3);X.fill();
+    X.strokeStyle='rgba(255,90,90,'+(.5+.4*Math.sin(tt*14))+')';X.lineWidth=3;X.beginPath();X.arc(f.x,f.y,e.R,0,6.3);X.stroke();
+    X.strokeStyle='rgba('+col+',.9)';X.beginPath();X.arc(f.x,f.y,e.R*(1-k),0,6.3);X.stroke();
+    const q=(el-(f.t-450))/450;if(q>0){X.strokeStyle='rgba('+col+',.95)';X.lineWidth=6;X.beginPath();X.moveTo(f.x,f.y-700*(1-q));X.lineTo(f.x,f.y-700*(1-q)+160);X.stroke()}}   // risco do fragmento caindo
+   else if(f.im&&el<f.t+e.Z){const a=Math.min(1,(f.t+e.Z-el)/1000);X.fillStyle='rgba('+col+','+(.16*a)+')';X.beginPath();X.arc(f.x,f.y,e.R,0,6.3);X.fill();
+    X.strokeStyle='rgba('+col+','+(.55*a+.25*Math.sin(tt*8)*a)+')';X.lineWidth=3;X.beginPath();X.arc(f.x,f.y,e.R,0,6.3);X.stroke()}
+   if(f.rw&&f.im&&!f.got&&el>=f.t+400&&el<f.t+e.RW){const b=Math.sin(tt*5)*4;X.fillStyle='rgba(255,210,63,.25)';X.beginPath();X.arc(f.x,f.y,22,0,6.3);X.fill();X.font='24px sans-serif';X.textAlign='center';X.textBaseline='middle';X.fillStyle='#fff';X.fillText('💎',f.x,f.y+b)}}};
+ const _cs=CHAOS.step;CHAOS.step=function(dt){_cs.call(this,dt);for(const e of EVT.act.values())if(AO(e))step(e,dt)};
+ const _bg=CHAOS.bg;CHAOS.bg=function(){_bg.call(this);for(const e of EVT.act.values())if(AO(e))draw(e)};
+})();
+
+/* ===== EVENTO: O VISITANTE (cliente · Etapa 5) =====
+   O servidor diz quem é, onde está e como é a prova. Aqui: chegada dramática, desenho, seta para achá-lo, falas e as provas.
+   Não é obrigatório: só acontece algo se o jogador chegar perto. Quem está dentro de uma construção não participa. */
+(()=>{
+ const AO=e=>e.id==='visitante'&&e.v,Z0=()=>!(typeof CITY!=='undefined'&&CITY.zn(G.p.y)),REG={R:'residencial',C:'comercial',I:'industrial',A:'abandonada',P:'da praça'};
+ const send=(e,a)=>PVP.send({t:'evv',sid:e.sid,a}),stop=(e,tell)=>{if(e.att){e.att=null;e.bu=[];if(tell)send(e,'cancel')}};
+ EVT.defs.visitante={
+  start(e){const d=e.data||{},v=d.v;if(!v)return;e.v={id:String(v.id||''),name:String(v.name||'VISITANTE').slice(0,30),icon:String(v.icon||'🎭').slice(0,4),color:/^#[0-9a-f]{6}$/i.test(v.color)?v.color:'#b07cff',mode:v.mode,need:Math.max(0,+v.needMs||0),r:Math.min(120,+v.r||55)};
+   e.vx=+d.x||0;e.vy=+d.y||0;e.age0=performance.now();e.late=(e.dur-(e.end-performance.now()))>3000;e.att=null;e.bu=[];e.talk=0;e.bub=null;
+   const b=typeof CITY!=='undefined'&&CITY.BL&&CITY.BL.find(q=>e.vx>=q.x&&e.vx<=q.x+q.w&&e.vy>=q.y&&e.vy<=q.y+q.h);if(!e.late)CHAOS.say('Um visitante chegou'+(b?' na região '+(REG[b.d]||''):'')+'…')},
+  end(e){e.att=null;if(e.v&&!e.late&&G.p&&Z0())FX.ring(e.vx,e.vy,e.v.color,120)},
+  msg(e,m){if(m.a==='vsay')e.bub={t:G.tm,txt:String(m.txt||'').slice(0,80)};
+   else if(m.a==='vstart'&&e.v.mode!=='oferta')e.att={t0:performance.now(),need:Math.max(1000,+m.need||e.v.need),nb:0};
+   else if(m.a==='vfail'){e.att=null;e.bub={t:G.tm,txt:'Não foi desta vez.'}}}};
+ const step=(e,dt)=>{const p=G.p;if(!p||!Z0())return;const d=Math.hypot(p.x-e.vx,p.y-e.vy);
+  if(CHAOS.dead){stop(e,true);e.talk=0;return}
+  if(!e.att){if(d<e.v.r){if(!e.talk){e.talk=1;send(e,'talk')}}else e.talk=0;return}   // chegou perto: fala (1 vez a cada aproximação)
+  const a=e.att,lim=e.v.mode==='desafio'?260:90;
+  if(d>lim){stop(e,true);e.bub={t:G.tm,txt:'Você se afastou.'};e.talk=1;return}
+  if(e.v.mode==='desafio'){a.nb-=dt;if(a.nb<=0){a.nb=1.1;const an=Math.random()*6.28,r=60+Math.random()*70;e.bu.push({x:p.x+Math.cos(an)*r,y:p.y+Math.sin(an)*r,t:G.tm+.9})}   // ataque avisado 0,9 s antes
+   for(const b of e.bu)if(!b.o&&G.tm>=b.t){b.o=1;FX.ring(b.x,b.y,'#ff6a3d',100);P.add(b.x,b.y,'#ff6a3d',10,240,.5,5);if(Math.hypot(p.x-b.x,p.y-b.y)<55+p.r*.5)p.hurt(p.mh*.1)}   // 10% da vida
+   e.bu=e.bu.filter(b=>G.tm<b.t+.5)}
+  if(performance.now()-a.t0>=a.need){e.att=null;e.bu=[];send(e,'done')}};
+ const draw=e=>{if(!G.p||!Z0())return;const c=G.cam,x=e.vx,y=e.vy;if(x<c.x-200||x>c.x+W+200||y<c.y-300||y>c.y+H+200)return;
+  const ag=(performance.now()-e.age0)/1000,k=e.late?1:Math.min(1,ag/2.5),t=G.tm,col=e.v.color;
+  if(ag<3&&!e.late){X.globalAlpha=Math.min(1,ag*3)*.55*(1-ag/3);X.fillStyle='#fff';X.fillRect(x-14,y-600,28,600);X.globalAlpha=1;X.strokeStyle=col;X.lineWidth=4;X.beginPath();X.arc(x,y,30+ag*90,0,6.3);X.stroke()}   // coluna de luz e onda na chegada
+  X.globalAlpha=k;X.strokeStyle=col;X.lineWidth=2;X.setLineDash([6,8]);X.beginPath();X.arc(x,y,e.v.mode==='vigilia'?90:e.v.r,0,6.3);X.stroke();X.setLineDash([]);
+  X.fillStyle=col;X.globalAlpha=k*(.22+.1*Math.sin(t*3));X.beginPath();X.arc(x,y,34,0,6.3);X.fill();X.globalAlpha=k;
+  X.textAlign='center';X.textBaseline='middle';X.font='34px sans-serif';X.fillStyle='#fff';X.fillText(e.v.icon,x+(Math.random()<.04?3:0),y+Math.sin(t*2)*4);   // treme de vez em quando
+  X.font='bold 12px sans-serif';X.lineWidth=3;X.strokeStyle='#000';X.fillStyle=col;X.strokeText(e.v.name,x,y-40);X.fillText(e.v.name,x,y-40);
+  if(e.att){const q=Math.min(1,(performance.now()-e.att.t0)/e.att.need);X.strokeStyle='#fff';X.lineWidth=5;X.beginPath();X.arc(x,y,44,-1.57,-1.57+6.28*q);X.stroke()}
+  if(e.bub&&t-e.bub.t<4){X.font='13px sans-serif';const w=X.measureText(e.bub.txt).width+16;X.fillStyle='rgba(0,0,0,.8)';X.fillRect(x-w/2,y-84,w,22);X.fillStyle='#fff';X.fillText(e.bub.txt,x,y-73)}
+  for(const b of e.bu){const w=Math.max(0,(b.t-t)/.9);X.strokeStyle='rgba(255,106,61,'+(.9-.4*w)+')';X.lineWidth=3;X.beginPath();X.arc(b.x,b.y,55,0,6.3);X.stroke();X.fillStyle='rgba(255,106,61,'+(.18*(1-w))+')';X.fill()}   // aviso do ataque
+  X.globalAlpha=1};
+ const hud=e=>{const p=G.p;if(!p||!Z0())return;const ag=(performance.now()-e.age0)/1000;
+  if(!e.late&&ag<3){X.fillStyle='rgba(10,0,25,'+(.38*Math.sin(Math.min(1,ag/3)*3.14))+')';X.fillRect(0,0,W,H)}   // a tela escurece na chegada
+  const sx=e.vx-G.cam.x,sy=e.vy-G.cam.y;if(sx>20&&sx<W-20&&sy>20&&sy<H-20)return;   // seta para achá-lo quando está fora da tela
+  const an=Math.atan2(e.vy-p.y,e.vx-p.x),cx=W/2+Math.cos(an)*(W/2-34),cy=H/2+Math.sin(an)*(H/2-34),m=Math.round(Math.hypot(e.vx-p.x,e.vy-p.y)/10);
+  X.save();X.translate(clamp(cx,34,W-34),clamp(cy,34,H-34));X.rotate(an);X.fillStyle=e.v.color;X.beginPath();X.moveTo(16,0);X.lineTo(-8,-10);X.lineTo(-8,10);X.closePath();X.fill();X.restore();
+  X.font='bold 12px sans-serif';X.textAlign='center';X.textBaseline='middle';X.lineWidth=3;X.strokeStyle='#000';X.fillStyle='#fff';const tx=clamp(cx,34,W-34)-Math.cos(an)*26,ty=clamp(cy,34,H-34)-Math.sin(an)*26;X.strokeText(e.v.icon+' '+m+'m',tx,ty);X.fillText(e.v.icon+' '+m+'m',tx,ty)};
+ const _cs=CHAOS.step;CHAOS.step=function(dt){_cs.call(this,dt);for(const e of EVT.act.values())if(AO(e))step(e,dt)};
+ const _bg=CHAOS.bg;CHAOS.bg=function(){_bg.call(this);for(const e of EVT.act.values())if(AO(e))draw(e)};
+ const _hd=CHAOS.hud;CHAOS.hud=function(){_hd.call(this);for(const e of EVT.act.values())if(AO(e))hud(e)};
+})();
+
+/* ===== EVENTO: A CASA IMPOSSÍVEL (cliente · Etapa 6) =====
+   Usa o sistema de interiores da cidade: ao começar, a construção sorteada pelo servidor ganha uma passagem impossível no
+   topo da sala e 3 salas extras (numa faixa nova do mapa, y >= 3050). Tudo nasce da semente enviada pelo servidor, então
+   todos veem as mesmas salas, armadilhas e fragmentos. Ao terminar, as salas e passagens são removidas e quem estava
+   dentro delas volta para a rua. Missão: 3 Fragmentos de Realidade (1 na construção, 1 em cada sala) e o Baú. */
+(()=>{
+ const AO=e=>e.id==='casa_impossivel'&&e.ch,on=()=>typeof CITY!=='undefined'&&CITY.on,ZI=()=>on()&&CITY.zn(G.p.y)===1,ZO=()=>on()&&CITY.zn(G.p.y)===0;
+ const hash=(s,a,b)=>{let h=(Math.imul(s,73856093)^Math.imul(a+1,19349663)^Math.imul(b+7,83492791))>>>0;h=Math.imul(h^h>>>15,2246822507)>>>0;h=Math.imul(h^h>>>13,3266489909)>>>0;return((h^h>>>16)>>>0)/4294967296};
+ const CHX=[150,1190,2240],CHY=3050,CHW=460,CHH=300,NM=['CORREDOR DOBRADO','SALA SEM TETO','CÂMARA DO BAÚ'],PER=i=>i===2?2500:3500,WARN=1200,RAD=70;   // salas, nomes, ritmo das armadilhas
+ const freePt=(s,q,k)=>{for(let t=0;t<80;t++){const x=q.x+80+hash(s,k,t*2)*(q.w-160),y=q.y+90+hash(s,k,t*2+1)*(q.h-180);if(!CITY.S.some(o=>x>o.x-45&&x<o.x+o.w+45&&y>o.y-45&&y<o.y+o.h+45))return{x,y}}return{x:q.x+q.w/2,y:q.y+q.h/2}};
+ const pc=(e,i,k)=>{const q=e.ch[i];return{x:q.x+60+hash(e.seed,10+i,k)*(q.w-120),y:q.y+70+hash(e.seed,20+i,k)*(q.h-140)}};
+ const safe=(q,x,y)=>{for(const dy of[70,100,130,170,210])for(const dx of[0,-70,70,-140,140,-210,210]){const a=x+dx,b=y-70+dy;
+   if(a>q.x+40&&a<q.x+q.w-40&&b>q.y+55&&b<q.y+q.h-90&&!CITY.S.some(o=>a>o.x-24&&a<o.x+o.w+24&&b>o.y-24&&b<o.y+o.h+24))return{x:a,y:b}}return{x:x,y:y}};   // perto da passagem e livre de móveis
+ const trig=(e,x,y,w,h,px,py)=>{const o={z:1,x,y,w,h,px,py};CITY.T.push(o);e.ad.T.push(o)};
+ EVT.defs.casa_impossivel={
+  start(e){if(!on())return;const d=e.data||{},b=(((d.b|0)%3)+3)%3,host=CITY.R[b],ent=CITY.ENT[b];if(!host||!ent)return;
+   e.b=b;e.seed=(d.seed|0)||1;e.host=host;e.old={fl:host.fl,nm:host.nm};host.fl='#2c1f3d';host.nm='CASA IMPOSSÍVEL';e.ad={R:[],S:[],T:[]};e.ch=[];e.rl=[0,0,0];e.n=0;e.li={};e.cl=0;e.open=!!d.cb;
+   for(let i=0;i<3;i++){const x=CHX[i],y=CHY,w=CHW,h=CHH,q={x,y,w,h,fl:i===2?'#3a2a14':'#24183a',nm:NM[i],f:[]};
+    q.wl=[{x:x-40,y:y-40,w:w+80,h:40},{x:x-40,y:y+h,w:w+80,h:40},{x:x-40,y:y,w:40,h:h},{x:x+w,y:y,w:40,h:h}].map(o=>Object.assign(o,{wl:1}));
+    for(const f of[.25,.75])q.f.push({x:x+w*f-18,y:y+h/2-18,w:36,h:36,c:'#554',e:'🗿'});
+    CITY.R.push(q);CITY.S.push(...q.wl,...q.f);e.ad.R.push(q);e.ad.S.push(...q.wl,...q.f);e.ch.push(q)}
+   const hx=host.x+host.w/2,c=i=>e.ch[i].x+CHW/2;
+   const ret=safe(host,hx,host.y+70);
+   trig(e,hx-40,host.y,80,20,c(0),CHY+CHH-90);   // passagem na parede de cima da construção
+   for(let i=0;i<3;i++){if(i<2)trig(e,c(i)-40,CHY,80,20,c(i+1),CHY+CHH-90);   // passagem para a próxima sala
+    trig(e,c(i)-34,CHY+CHH-26,68,26,i?c(i-1):ret.x,i?CHY+70:ret.y)}   // saída (volta)
+   e.rp=[freePt(e.seed,host,0),freePt(e.seed,e.ch[0],1),freePt(e.seed,e.ch[1],2)];e.cp={x:c(2),y:CHY+80};
+   if(!e.late)CHAOS.say('A '+e.old.nm.toLowerCase()+' da cidade está se distorcendo…')},
+  end(e){if(!e.ad)return;const p=G.p;
+   if(p&&on()&&p.y>=3000){const b=CITY.ENT[e.b];if(b){p.x=b.x+b.w/2;p.y=b.y+b.h+56;p.doorCd=G.tm+.6;G.cam.x=clamp(p.x-W/2,AR.x,AR.x+AR.w-W);G.cam.y=clamp(p.y-H/2,AR.y,AR.y+AR.h-H);FX.ring(p.x,p.y,'#b07cff',120);PVP.snap();CHAOS.say('A casa voltou ao normal.')}}   // quem estava nas salas extras volta para a rua
+   for(const[k,l]of[['R',CITY.R],['S',CITY.S],['T',CITY.T]])for(const o of e.ad[k]){const i=l.indexOf(o);if(i>=0)l.splice(i,1)}
+   e.host.fl=e.old.fl;e.host.nm=e.old.nm;e.ad=null;e.ch=null},
+  msg(e,m){if(m.a==='hrel'){e.n=Math.max(e.n||0,m.n|0);FX.text(G.p.x,G.p.y-50,'FRAGMENTO DE REALIDADE '+e.n+'/3','#b07cff',26,1.2);Snd.sfx('aw')}
+   else if(m.a==='hchest'){e.open=true;CHAOS.say(String(m.by||'Alguém').slice(0,14)+' abriu o Baú Impossível!');Snd.sfx('aw')}}};
+ const step=(e,dt)=>{const p=G.p,el=performance.now()-e.t0;if(!p)return;const inside=!CHAOS.dead&&ZI();
+  for(let i=0;i<3;i++){const q=e.ch[i],k=Math.floor(el/PER(i))-1;if(e.li[i]===undefined)e.li[i]=k;   // armadilhas: o horário de cada uma sai do relógio do evento
+   while(e.li[i]<k){e.li[i]++;if(inside&&p.x>q.x&&p.x<q.x+q.w&&p.y>q.y&&p.y<q.y+q.h){const c=pc(e,i,e.li[i]);FX.ring(c.x,c.y,'#b07cff',RAD*1.5);P.add(c.x,c.y,'#b07cff',8,220,.5,4);if(Math.hypot(p.x-c.x,p.y-c.y)<RAD+p.r*.5)p.hurt(p.mh*.08)}}}   // 8% da vida
+  if(!inside)return;
+  for(let j=0;j<3;j++)if(!e.rl[j]&&Math.hypot(p.x-e.rp[j].x,p.y-e.rp[j].y)<30){e.rl[j]=1;PVP.send({t:'evh',sid:e.sid,a:'relic',i:j})}   // pede o fragmento ao servidor
+  if(!e.cl&&!e.open&&Math.hypot(p.x-e.cp.x,p.y-e.cp.y)<40){if(e.n>=3){e.cl=1;PVP.send({t:'evh',sid:e.sid,a:'chest'})}else if(G.tm-(e.hint||-9)>4){e.hint=G.tm;FX.text(e.cp.x,e.cp.y-40,'O BAÚ ESTÁ SELADO ('+(e.n||0)+'/3)','#fff',16,1.2)}}};
+ const draw=e=>{if(!G.p)return;const c=G.cam,t=G.tm,el=performance.now()-e.t0;
+  if(ZO()){const b=CITY.ENT[e.b];if(!b||b.x>c.x+W+100||b.x+b.w<c.x-100||b.y>c.y+H+100||b.y+b.h<c.y-100)return;   // brilho na construção afetada
+   X.globalAlpha=.22+.12*Math.sin(t*4);X.fillStyle='#b07cff';X.fillRect(b.x-10,b.y-10,b.w+20,b.h+20);X.globalAlpha=1;X.strokeStyle='#b07cff';X.lineWidth=3;X.setLineDash([10,8]);X.strokeRect(b.x-10+Math.sin(t*3)*3,b.y-10,b.w+20,b.h+20);X.setLineDash([]);
+   X.font='28px sans-serif';X.textAlign='center';X.textBaseline='middle';X.fillStyle='#fff';X.fillText('🌀',b.x+b.w/2,b.y-28+Math.sin(t*2)*4);return}
+  if(!ZI())return;X.textAlign='center';X.textBaseline='middle';
+  const por=(x,y)=>{X.fillStyle='rgba(176,124,255,'+(.45+.15*Math.sin(t*5))+')';X.beginPath();X.ellipse(x,y,44,15,0,0,6.3);X.fill();X.font='18px sans-serif';X.fillStyle='#fff';X.fillText('🌀',x,y+8)};
+  if(Math.abs(G.p.y-e.host.y)<600)por(e.host.x+e.host.w/2,e.host.y+6);   // passagens
+  for(let i=0;i<3;i++){const q=e.ch[i];if(q.x>c.x+W||q.x+q.w<c.x||q.y>c.y+H||q.y+q.h<c.y)continue;if(i<2)por(q.x+q.w/2,q.y+6);
+   const P2=PER(i),k=Math.floor(el/P2);if(el>=(k+1)*P2-WARN){const o=pc(e,i,k),a=(el-((k+1)*P2-WARN))/WARN;X.fillStyle='rgba(176,124,255,'+(.12+.2*a)+')';X.beginPath();X.arc(o.x,o.y,RAD,0,6.3);X.fill();X.strokeStyle='rgba(255,255,255,'+(.4+.4*Math.sin(t*16))+')';X.lineWidth=3;X.stroke()}}   // armadilha avisada
+  for(let j=0;j<3;j++){const r=e.rp[j];if(e.rl[j]||r.x<c.x-40||r.x>c.x+W+40||r.y<c.y-40||r.y>c.y+H+40)continue;X.fillStyle='rgba(120,200,255,'+(.25+.12*Math.sin(t*5))+')';X.beginPath();X.arc(r.x,r.y,22,0,6.3);X.fill();X.font='22px sans-serif';X.fillStyle='#fff';X.fillText('🔷',r.x,r.y+Math.sin(t*3)*3)}
+  X.font='30px sans-serif';X.globalAlpha=e.open?.5:1;X.fillStyle='#fff';X.fillText(e.open?'📭':'🎁',e.cp.x,e.cp.y);X.globalAlpha=1};
+ const hud=e=>{if(!G.p)return;const p=G.p;let y=84+18*EVT.act.size;X.save();X.textBaseline='middle';X.textAlign='left';X.font='bold 13px sans-serif';X.lineWidth=3;X.strokeStyle='#000';X.fillStyle='#b07cff';const tx='🔷 '+(e.n||0)+'/3'+(e.open?'  ·  baú já aberto':'');X.strokeText(tx,14,y);X.fillText(tx,14,y);
+  const b=CITY.ENT[e.b];if(ZO()&&b){const bx=b.x+b.w/2,by=b.y+b.h/2,sx=bx-G.cam.x,sy=by-G.cam.y;if(!(sx>20&&sx<W-20&&sy>20&&sy<H-20)){const an=Math.atan2(by-p.y,bx-p.x),ax=clamp(W/2+Math.cos(an)*(W/2-34),34,W-34),ay=clamp(H/2+Math.sin(an)*(H/2-34),34,H-34);   // seta até a construção
+   X.translate(ax,ay);X.rotate(an);X.fillStyle='#b07cff';X.beginPath();X.moveTo(16,0);X.lineTo(-8,-10);X.lineTo(-8,10);X.closePath();X.fill()}}X.restore()};
+ const _cs=CHAOS.step;CHAOS.step=function(dt){_cs.call(this,dt);for(const e of EVT.act.values())if(AO(e))step(e,dt)};
+ const _bg=CHAOS.bg;CHAOS.bg=function(){_bg.call(this);for(const e of EVT.act.values())if(AO(e))draw(e)};
+ const _hd=CHAOS.hud;CHAOS.hud=function(){_hd.call(this);for(const e of EVT.act.values())if(AO(e))hud(e)};
+})();
+
+/* ===== EVENTO: A RUPTURA (LENDÁRIO · cliente · Etapa 7) =====
+   Fenda no céu sobre uma região da cidade + criaturas que saem dela. As criaturas são inimigos de verdade (entram em
+   G.enemies), então TODAS as habilidades existentes funcionam nelas. A vida vem do servidor; o dano que você causa
+   vai para o servidor a cada 0,25 s; o dano que elas causam em você é calculado aqui. Posição e ataques das criaturas
+   saem do relógio do evento + semente (iguais em todos os aparelhos). Tudo some ao terminar. */
+(()=>{
+ const AO=e=>e.id==='ruptura'&&e.cr,on=()=>typeof CITY!=='undefined'&&CITY.on,Z0=()=>on()&&CITY.zn(G.p.y)===0;
+ const hash=(s,a,b)=>{let h=(Math.imul(s,73856093)^Math.imul(a+1,19349663)^Math.imul(b+7,83492791))>>>0;h=Math.imul(h^h>>>15,2246822507)>>>0;h=Math.imul(h^h>>>13,3266489909)>>>0;return((h^h>>>16)>>>0)/4294967296};
+ const KD={larva:{col:'#c04dff',nm:'LARVA DA FENDA',per:2400,tele:600,rad:42,dmg:.06},guardiao:{col:'#ff4d6d',nm:'GUARDIÃO DA FENDA',per:4000,tele:1000,rad:110,dmg:.12},colosso:{col:'#ffd23f',nm:'COLOSSO DA RUPTURA',per:5000,tele:1200,rad:170,dmg:.15}};
+ const STR={per:2200,tele:1000,rad:60,dmg:.06},BOLT={gap:380,life:2400,spd:230,dmg:.07,from:4000};   // raios do céu · projéteis em espiral do Colosso
+ const pos=(e,c,t)=>{const D=e.data,k=KD[c.k],s=Math.max(0,t-c.sp),rho=c.k==='colosso'?.12:.25+hash(e.seed,c.id,4)*.6,om=(hash(e.seed,c.id,2)<.5?-1:1)*(.25+hash(e.seed,c.id,3)*.25),ph=hash(e.seed,c.id,1)*6.283,rr=D.R*.75*rho*Math.min(1,s/1500);
+  return{x:D.x+Math.cos(ph+om*t/1000)*rr,y:D.y+Math.sin(ph+om*t/1000)*rr}};   // órbita ao redor da fenda; nasce do centro
+ const hp=c=>Math.max(0,c.hp-c.pend-c.fl),alive=c=>!c.dead&&hp(c)>0;
+ class Rift{constructor(e,c){this.e=e;this.c=c;this.id='rf_'+c.id;this.t='Z';this.s={c:KD[c.k].col};this.r=c.r;this.mh=c.mh;this.x=0;this.y=0;this.dead=false;this.kx=this.ky=this.stun=this.pull=this.dz=this.fl=this.mk=this.dc=this.slw=0;this.a=0;const p=pos(e,c,performance.now()-e.t0);this.x=p.x;this.y=p.y}
+  get hp(){return hp(this.c)}set hp(v){const d=hp(this.c)-v;if(d>0)this.c.pend+=d}   // dano local fica "pendente" até ir para o servidor
+  update(dt){const p=pos(this.e,this.c,performance.now()-this.e.t0);this.x=p.x;this.y=p.y;this.fl=Math.max(0,this.fl-dt);this.kx=this.ky=this.stun=this.pull=this.dz=0;if(this.c.dead||this.e.done)this.dead=true}   // imóveis a golpes: o caminho é do evento
+  draw(){const c=this.c,K=KD[c.k],t=G.tm,r=this.r*(1+.05*Math.sin(t*4+c.id));X.save();X.translate(this.x,this.y);X.fillStyle='#0006';X.beginPath();X.ellipse(0,r*.7,r,r*.4,0,0,6.3);X.fill();
+   X.fillStyle=this.fl>0?'#fff':K.col;X.strokeStyle='#000';X.lineWidth=3;X.beginPath();X.arc(0,0,r,0,6.3);X.fill();X.stroke();X.strokeStyle='rgba(255,255,255,.5)';X.lineWidth=2;X.beginPath();X.arc(0,0,r*.6+Math.sin(t*6)*2,0,6.3);X.stroke();
+   X.fillStyle='#000';for(const s of[-1,1]){X.beginPath();X.arc(s*r*.3,-r*.1,r*.14,0,6.3);X.fill()}if(c.k==='colosso'){X.font=(r*.7|0)+'px sans-serif';X.textAlign='center';X.textBaseline='middle';X.fillText('👑',0,-r-6)}X.restore();
+   const w=r*2,q=hp(c)/c.mh;X.fillStyle='#000a';X.fillRect(this.x-w/2,this.y-r-14,w,5);X.fillStyle=K.col;X.fillRect(this.x-w/2,this.y-r-14,w*Math.max(0,q),5)}}
+ const find=(e,id)=>e.cr.find(c=>c.id===id|0);
+ EVT.defs.ruptura={
+  start(e){if(!on())return;const d=e.data||{};if(!Array.isArray(d.cr))return;e.seed=d.seed|0;e.late=(e.dur-(e.end-performance.now()))>3000;e.win=!!(e.live&&e.live.win);e.done=false;e.sf=0;e.fx=0;e.qt=0;e.bh=new Set();
+   e.cr=d.cr.slice(0,40).map(c=>({id:c.id|0,k:KD[c.k]?c.k:'larva',sp:+c.sp||0,mh:Math.max(1,+c.mh||1),r:Math.min(60,+c.r||16),hp:Math.max(1,+c.mh||1),pend:0,fl:0,dead:false,ent:null,lk:undefined}));
+   if(e.live){for(const[i,h]of e.live.hp||[]){const c=find(e,i);if(c)c.hp=Math.max(1,+h||1)}for(const i of e.live.dead||[]){const c=find(e,i);if(c)c.dead=true}}
+   if(!e.late)CHAOS.say('A RUPTURA: o céu da cidade está se abrindo…')},
+  end(e){if(!e.cr)return;e.done=true;for(const c of e.cr){c.dead=true;if(c.ent)c.ent.dead=true}if(!e.late||true)CHAOS.say(e.win?'A cidade volta ao normal.':'A fenda se fechou sozinha.')},
+  msg(e,m){if(!e.cr)return;
+   if(m.a==='rhp'){for(const[i,h]of m.h||[]){const c=find(e,i);if(c){c.hp=Math.max(1,+h||1);c.fl=0}}}   // vida oficial do servidor
+   else if(m.a==='rdie'){const c=find(e,m.id);if(c&&!c.dead){c.dead=true;c.hp=0;const p=pos(e,c,performance.now()-e.t0);if(G.p&&Z0()){FX.ring(p.x,p.y,KD[c.k].col,c.r*3);P.add(p.x,p.y,KD[c.k].col,16,260,.6,5);if(c.k!=='larva')G.shake=Math.max(G.shake||0,10);Snd.sfx('boom')}CHAOS.say(KD[c.k].nm+' derrotado por '+String(m.by||'?').slice(0,14))}}
+   else if(m.a==='rwin'){e.win=true;e.wt=performance.now();for(const c of e.cr)c.dead=true;G.flash=Math.max(G.flash||0,1);G.shake=Math.max(G.shake||0,16);Snd.sfx('aw');CHAOS.say('A RUPTURA FOI SELADA por '+String(m.by||'?').slice(0,14)+'!')}
+   else if(m.a==='rend'){CHAOS.say(m.win?'RUPTURA VENCIDA!':'A Ruptura terminou sem vitória.');if(m.top)CHAOS.say('Maior dano: '+String(m.top.name).slice(0,14)+' ('+(m.top.dmg|0)+')')}}};
+ const hurtMe=(f)=>{const p=G.p;if(p&&!CHAOS.dead&&Z0())p.hurt(p.mh*f)},nearMe=(x,y,r)=>{const p=G.p;return p&&Math.hypot(p.x-x,p.y-y)<r+p.r*.5};
+ const step=(e,dt)=>{const p=G.p,el=performance.now()-e.t0;if(!p||e.done)return;
+  for(const c of e.cr){if(c.dead||el<c.sp)continue;
+   if(!c.ent||c.ent.dead){if(alive(c)){c.ent=new Rift(e,c);G.enemies.push(c.ent);if(!c.sh){c.sh=1;if(!e.late||el-c.sp<2000){FX.ring(c.ent.x,c.ent.y,KD[c.k].col,c.r*3);if(Z0())G.shake=Math.max(G.shake||0,c.k==='colosso'?14:4);if(c.k==='colosso')Snd.sfx('boom')}}}}
+   const K=KD[c.k],off=(c.id*397)%K.per,k=Math.floor((el-c.sp+off)/K.per);if(c.lk===undefined)c.lk=k;   // ataque em área: aviso antes, impacto no horário certo
+   if(c.lk<k){c.lk=k;if(el>c.sp+1500){const ti=c.sp-off+k*K.per,q=pos(e,c,ti);FX.ring(q.x,q.y,K.col,K.rad);if(nearMe(q.x,q.y,K.rad))hurtMe(K.dmg)}}}
+  {const k=Math.floor(el/STR.per);if(e.qt===0)e.qt=k;while(e.qt<k){e.qt++;const q=strike(e,e.qt);FX.ring(q.x,q.y,'#ff4d6d',STR.rad*1.4);if(nearMe(q.x,q.y,STR.rad))hurtMe(STR.dmg)}}   // raios do céu na região
+  for(const c of e.cr){if(c.k!=='colosso'||c.dead||el<c.sp+BOLT.from)continue;const lo=Math.max(0,Math.ceil((el-c.sp-BOLT.from-BOLT.life)/BOLT.gap)),hi=Math.floor((el-c.sp-BOLT.from)/BOLT.gap);
+   for(let k=lo;k<=hi;k++)for(const arm of[0,1]){const key=c.id+':'+k+':'+arm;if(e.bh.has(key))continue;const b=bolt(e,c,k,arm,el);if(nearMe(b.x,b.y,12)){e.bh.add(key);hurtMe(BOLT.dmg)}}   // espiral de projéteis (cada um acerta 1 vez)
+   if(e.bh.size>200)e.bh.clear()}
+  e.sf-=dt;if(e.sf<=0){e.sf=.25;const h=[];for(const c of e.cr)if(c.pend>=1){h.push([c.id,Math.round(c.pend)]);c.fl+=c.pend;c.pend=0}if(h.length)PVP.send({t:'evr',sid:e.sid,h})}};   // manda o dano causado ao servidor
+ const strike=(e,k)=>({x:e.data.x+(hash(e.seed,50,k)*2-1)*e.data.R*.8,y:e.data.y+(hash(e.seed,51,k)*2-1)*e.data.R*.8});
+ const bolt=(e,c,k,arm,el)=>{const tk=c.sp+BOLT.from+k*BOLT.gap,o=pos(e,c,tk),a=hash(e.seed,c.id,90)*6.283+k*.62+arm*Math.PI,s=(el-tk)/1000*BOLT.spd;return{x:o.x+Math.cos(a)*s,y:o.y+Math.sin(a)*s}};
+ const draw=e=>{if(!G.p||!Z0())return;const c0=G.cam,t=G.tm,el=performance.now()-e.t0,D=e.data;if(D.x+D.R<c0.x||D.x-D.R>c0.x+W||D.y+D.R<c0.y||D.y-D.R>c0.y+H)return;
+  const open=e.late?1:Math.min(1,el/6000),close=e.win&&e.wt?Math.max(0,1-(performance.now()-e.wt)/9000):Math.max(0,Math.min(1,(e.dur-el)/6000)),sc=Math.min(open,close);   // a fenda abre e fecha
+  const g=X.createRadialGradient(D.x,D.y,D.R*.15,D.x,D.y,D.R);g.addColorStop(0,'rgba(140,30,190,'+(.4*sc)+')');g.addColorStop(1,'rgba(140,30,190,0)');X.fillStyle=g;X.beginPath();X.arc(D.x,D.y,D.R,0,6.3);X.fill();   // região afetada
+  X.save();X.translate(D.x,D.y);X.fillStyle='rgba(10,0,20,'+(.85*sc)+')';X.beginPath();X.ellipse(0,0,70*sc,70*sc,0,0,6.3);X.fill();
+  for(let i=0;i<5;i++){X.strokeStyle='rgba('+(i%2?'255,210,63':'192,77,255')+','+(.7*sc)+')';X.lineWidth=3;X.beginPath();X.arc(0,0,(40+i*18)*sc,t*(1+i*.4)+i,t*(1+i*.4)+i+3.5);X.stroke()}X.restore();   // portal
+  const ks=Math.floor(el/STR.per);if(el%STR.per>=STR.per-STR.tele){const q=strike(e,ks+1),a=(el%STR.per-(STR.per-STR.tele))/STR.tele;X.fillStyle='rgba(255,77,109,'+(.1+.2*a)+')';X.beginPath();X.arc(q.x,q.y,STR.rad,0,6.3);X.fill();X.strokeStyle='rgba(255,255,255,'+(.4+.4*Math.sin(t*16))+')';X.lineWidth=3;X.stroke()}   // raio avisado
+  for(const c of e.cr){if(c.dead||el<c.sp+1500)continue;const K=KD[c.k],off=(c.id*397)%K.per,k=Math.floor((el-c.sp+off)/K.per),ti=c.sp-off+(k+1)*K.per;
+   if(el>=ti-K.tele){const q=pos(e,c,ti),a=(el-(ti-K.tele))/K.tele;X.fillStyle='rgba(255,60,60,'+(.1+.2*a)+')';X.beginPath();X.arc(q.x,q.y,K.rad,0,6.3);X.fill();X.strokeStyle='rgba(255,60,60,'+(.5+.4*Math.sin(t*16))+')';X.lineWidth=3;X.stroke()}   // ataque avisado
+   if(c.k==='colosso'&&el>=c.sp+BOLT.from){const lo=Math.max(0,Math.ceil((el-c.sp-BOLT.from-BOLT.life)/BOLT.gap)),hi=Math.floor((el-c.sp-BOLT.from)/BOLT.gap);for(let k2=lo;k2<=hi;k2++)for(const arm of[0,1]){const b=bolt(e,c,k2,arm,el);X.fillStyle='#ffd23f';X.beginPath();X.arc(b.x,b.y,7,0,6.3);X.fill();X.strokeStyle='#fff';X.lineWidth=2;X.stroke()}}}};
+ const hud=e=>{const p=G.p;if(!p||e.done)return;const el=performance.now()-e.t0;
+  if(Z0()){const D=e.data,dz=Math.hypot(p.x-D.x,p.y-D.y)<D.R;X.fillStyle='rgba(40,0,70,'+(.13+.03*Math.sin(G.tm*2))+')';X.fillRect(0,0,W,H);if(dz){X.fillStyle='rgba(140,0,50,'+(.07+.04*Math.sin(G.tm*5))+')';X.fillRect(0,0,W,H)}   // o céu da cidade inteira escurece
+   if(!e.late&&el<6000)G.shake=Math.max(G.shake||0,3);
+   const sx=D.x-G.cam.x,sy=D.y-G.cam.y;if(!(sx>30&&sx<W-30&&sy>30&&sy<H-30)){const an=Math.atan2(D.y-p.y,D.x-p.x),ax=clamp(W/2+Math.cos(an)*(W/2-34),34,W-34),ay=clamp(H/2+Math.sin(an)*(H/2-34),34,H-34);X.save();X.translate(ax,ay);X.rotate(an);X.fillStyle='#c04dff';X.beginPath();X.moveTo(16,0);X.lineTo(-8,-10);X.lineTo(-8,10);X.closePath();X.fill();X.restore()}}   // seta até a fenda
+  const col=e.cr.find(c=>c.k==='colosso');X.save();X.textAlign='center';X.textBaseline='middle';
+  if(col&&!col.dead&&el>=col.sp){const w=360,q=hp(col)/col.mh;X.fillStyle='#000a';X.fillRect(W/2-w/2-3,66,w+6,18);X.fillStyle='#ffd23f';X.fillRect(W/2-w/2,69,w*Math.max(0,q),12);X.font='bold 12px sans-serif';X.lineWidth=3;X.strokeStyle='#000';X.fillStyle='#fff';X.strokeText('👑 COLOSSO DA RUPTURA',W/2,58);X.fillText('👑 COLOSSO DA RUPTURA',W/2,58)}   // barra de vida do chefe
+  else if(!e.win){const n=e.cr.filter(c=>!c.dead&&el>=c.sp).length;X.font='bold 13px sans-serif';X.lineWidth=3;X.strokeStyle='#000';X.fillStyle='#c04dff';const tx='🌌 '+(el<8000?'A FENDA ESTÁ SE ABRINDO':'CRIATURAS NA CIDADE: '+n);X.strokeText(tx,W/2,62);X.fillText(tx,W/2,62)}X.restore()};
+ const _cs=CHAOS.step;CHAOS.step=function(dt){_cs.call(this,dt);for(const e of EVT.act.values())if(AO(e))step(e,dt)};
+ const _bg=CHAOS.bg;CHAOS.bg=function(){_bg.call(this);for(const e of EVT.act.values())if(AO(e))draw(e)};
+ const _hd=CHAOS.hud;CHAOS.hud=function(){_hd.call(this);for(const e of EVT.act.values())if(AO(e))hud(e)};
+})();
 
 let last=0;function loop(t){const dt=Math.min(.05,(t-last)/1000||0);last=t;if(G.run&&!G.paused&&!(IN.tc&&innerHeight>innerWidth))G.update(dt);G.draw();requestAnimationFrame(loop)}
 UI.menu();requestAnimationFrame(loop);
