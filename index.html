@@ -1997,7 +1997,7 @@ const EVT=(()=>{
    vai para o servidor a cada 0,25 s; o dano que elas causam em você é calculado aqui. Posição e ataques das criaturas
    saem do relógio do evento + semente (iguais em todos os aparelhos). Tudo some ao terminar. */
 (()=>{
- const AO=e=>e.id==='ruptura'&&e.cr,on=()=>typeof CITY!=='undefined'&&CITY.on,Z0=()=>on()&&CITY.zn(G.p.y)===0;
+ const LQ=()=>typeof GFX!=='undefined'?GFX.q:2,AO=e=>e.id==='ruptura'&&e.cr,on=()=>typeof CITY!=='undefined'&&CITY.on,Z0=()=>on()&&CITY.zn(G.p.y)===0;
  const hash=(s,a,b)=>{let h=(Math.imul(s,73856093)^Math.imul(a+1,19349663)^Math.imul(b+7,83492791))>>>0;h=Math.imul(h^h>>>15,2246822507)>>>0;h=Math.imul(h^h>>>13,3266489909)>>>0;return((h^h>>>16)>>>0)/4294967296};
  const KD={larva:{col:'#c04dff',nm:'LARVA DA FENDA',per:2400,tele:600,rad:42,dmg:.06},guardiao:{col:'#ff4d6d',nm:'GUARDIÃO DA FENDA',per:4000,tele:1000,rad:110,dmg:.12},colosso:{col:'#ffd23f',nm:'COLOSSO DA RUPTURA',per:5000,tele:1200,rad:170,dmg:.15}};
  const STR={per:2200,tele:1000,rad:60,dmg:.06},BOLT={gap:380,life:2400,spd:230,dmg:.07,from:4000};   // raios do céu · projéteis em espiral do Colosso
@@ -2038,15 +2038,15 @@ const EVT=(()=>{
  const bolt=(e,c,k,arm,el)=>{const tk=c.sp+BOLT.from+k*BOLT.gap,o=pos(e,c,tk),a=hash(e.seed,c.id,90)*6.283+k*.62+arm*Math.PI,s=(el-tk)/1000*BOLT.spd;return{x:o.x+Math.cos(a)*s,y:o.y+Math.sin(a)*s}};
  const draw=e=>{if(!G.p||!Z0())return;const c0=G.cam,t=G.tm,el=performance.now()-e.t0,D=e.data;if(D.x+D.R<c0.x||D.x-D.R>c0.x+W||D.y+D.R<c0.y||D.y-D.R>c0.y+H)return;
   const open=e.late?1:Math.min(1,el/6000),close=e.win&&e.wt?Math.max(0,1-(performance.now()-e.wt)/9000):Math.max(0,Math.min(1,(e.dur-el)/6000)),sc=Math.min(open,close);   // a fenda abre e fecha
-  const g=X.createRadialGradient(D.x,D.y,D.R*.15,D.x,D.y,D.R);g.addColorStop(0,'rgba(140,30,190,'+(.4*sc)+')');g.addColorStop(1,'rgba(140,30,190,0)');X.fillStyle=g;X.beginPath();X.arc(D.x,D.y,D.R,0,6.3);X.fill();   // região afetada
+  if(LQ()>=1){const g=X.createRadialGradient(D.x,D.y,D.R*.15,D.x,D.y,D.R);g.addColorStop(0,'rgba(140,30,190,'+(.4*sc)+')');g.addColorStop(1,'rgba(140,30,190,0)');X.fillStyle=g}else X.fillStyle='rgba(140,30,190,'+(.18*sc)+')';X.beginPath();X.arc(D.x,D.y,D.R,0,6.3);X.fill();   // qualidade baixa: sem degradê   // região afetada
   X.save();X.translate(D.x,D.y);X.fillStyle='rgba(10,0,20,'+(.85*sc)+')';X.beginPath();X.ellipse(0,0,70*sc,70*sc,0,0,6.3);X.fill();
-  for(let i=0;i<5;i++){X.strokeStyle='rgba('+(i%2?'255,210,63':'192,77,255')+','+(.7*sc)+')';X.lineWidth=3;X.beginPath();X.arc(0,0,(40+i*18)*sc,t*(1+i*.4)+i,t*(1+i*.4)+i+3.5);X.stroke()}X.restore();   // portal
+  for(let i=0,n=LQ()>=2?5:3;i<n;i++){X.strokeStyle='rgba('+(i%2?'255,210,63':'192,77,255')+','+(.7*sc)+')';X.lineWidth=3;X.beginPath();X.arc(0,0,(40+i*18)*sc,t*(1+i*.4)+i,t*(1+i*.4)+i+3.5);X.stroke()}X.restore();   // portal
   const ks=Math.floor(el/STR.per);if(el%STR.per>=STR.per-STR.tele){const q=strike(e,ks+1),a=(el%STR.per-(STR.per-STR.tele))/STR.tele;X.fillStyle='rgba(255,77,109,'+(.1+.2*a)+')';X.beginPath();X.arc(q.x,q.y,STR.rad,0,6.3);X.fill();X.strokeStyle='rgba(255,255,255,'+(.4+.4*Math.sin(t*16))+')';X.lineWidth=3;X.stroke()}   // raio avisado
   for(const c of e.cr){if(c.dead||el<c.sp+1500)continue;const K=KD[c.k],off=(c.id*397)%K.per,k=Math.floor((el-c.sp+off)/K.per),ti=c.sp-off+(k+1)*K.per;
    if(el>=ti-K.tele){const q=pos(e,c,ti),a=(el-(ti-K.tele))/K.tele;X.fillStyle='rgba(255,60,60,'+(.1+.2*a)+')';X.beginPath();X.arc(q.x,q.y,K.rad,0,6.3);X.fill();X.strokeStyle='rgba(255,60,60,'+(.5+.4*Math.sin(t*16))+')';X.lineWidth=3;X.stroke()}   // ataque avisado
    if(c.k==='colosso'&&el>=c.sp+BOLT.from){const lo=Math.max(0,Math.ceil((el-c.sp-BOLT.from-BOLT.life)/BOLT.gap)),hi=Math.floor((el-c.sp-BOLT.from)/BOLT.gap);for(let k2=lo;k2<=hi;k2++)for(const arm of[0,1]){const b=bolt(e,c,k2,arm,el);X.fillStyle='#ffd23f';X.beginPath();X.arc(b.x,b.y,7,0,6.3);X.fill();X.strokeStyle='#fff';X.lineWidth=2;X.stroke()}}}};
  const hud=e=>{const p=G.p;if(!p||e.done)return;const el=performance.now()-e.t0;
-  if(Z0()){const D=e.data,dz=Math.hypot(p.x-D.x,p.y-D.y)<D.R;X.fillStyle='rgba(40,0,70,'+(.13+.03*Math.sin(G.tm*2))+')';X.fillRect(0,0,W,H);if(dz){X.fillStyle='rgba(140,0,50,'+(.07+.04*Math.sin(G.tm*5))+')';X.fillRect(0,0,W,H)}   // o céu da cidade inteira escurece
+  if(Z0()){const D=e.data,dz=Math.hypot(p.x-D.x,p.y-D.y)<D.R,fx=LQ()>=1;if(fx){X.fillStyle='rgba(40,0,70,'+(.13+.03*Math.sin(G.tm*2))+')';X.fillRect(0,0,W,H)}if(dz&&fx){X.fillStyle='rgba(140,0,50,'+(.07+.04*Math.sin(G.tm*5))+')';X.fillRect(0,0,W,H)}   // o céu da cidade inteira escurece
    if(!e.late&&el<6000)G.shake=Math.max(G.shake||0,3);
    const sx=D.x-G.cam.x,sy=D.y-G.cam.y;if(!(sx>30&&sx<W-30&&sy>30&&sy<H-30)){const an=Math.atan2(D.y-p.y,D.x-p.x),ax=clamp(W/2+Math.cos(an)*(W/2-34),34,W-34),ay=clamp(H/2+Math.sin(an)*(H/2-34),34,H-34);X.save();X.translate(ax,ay);X.rotate(an);X.fillStyle='#c04dff';X.beginPath();X.moveTo(16,0);X.lineTo(-8,-10);X.lineTo(-8,10);X.closePath();X.fill();X.restore()}}   // seta até a fenda
   const col=e.cr.find(c=>c.k==='colosso');X.save();X.textAlign='center';X.textBaseline='middle';
