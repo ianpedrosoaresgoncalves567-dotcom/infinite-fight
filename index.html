@@ -103,7 +103,7 @@ small{color:#aab4c8}
 <div id="rot"><div style="font-size:60px">📱↻</div>GIRE O APARELHO<br>Infinite Fight só funciona no modo deitado (paisagem).</div>
 <div id="menu" class="ov">
  <h1>INFINITE FIGHT</h1><h2>ESCOLHA SEU PERSONAGEM</h2>
- <div class="row"><button class="ch sel" data-c="fisch">🐟<br>O DEUS<br>DO ABISMO</button><button class="ch" data-c="ronaldon">🧮<br>A EQUAÇÃO<br>HUMANA</button><button class="ch" data-c="neko">🐈<br>A RAPOSA<br>FANTASMA</button><button class="ch" data-c="titan">🤖<br>O COLOSSO</button><button class="ch" data-c="pong">🏓<br>O IMPOSSÍVEL</button><button class="ch" data-c="brave">🦁<br>A CORAGEM<br>ENCARNADA</button><button class="ch" data-c="kira">🎀<br>O CAOS<br>FOFO</button><button class="ch" data-c="void">🕳️<br>A SINGULARIDADE</button><button class="ch" data-c="lira">💇‍♀️<br>RAINHA<br>DOS FIOS</button><button class="ch" data-c="yan">👑<br>O ADAPTADOR</button></div>
+ <div class="row"><button class="ch sel" data-c="fisch">🐟<br>O DEUS<br>DO ABISMO</button><button class="ch" data-c="ronaldon">🧮<br>A EQUAÇÃO<br>HUMANA</button><button class="ch" data-c="neko">🐈<br>A RAPOSA<br>FANTASMA</button><button class="ch" data-c="titan">🤖<br>O COLOSSO</button><button class="ch" data-c="pong">🏓<br>O IMPOSSÍVEL</button><button class="ch" data-c="brave">🦁<br>A CORAGEM<br>ENCARNADA</button><button class="ch" data-c="kira">🎀<br>O CAOS<br>FOFO</button><button class="ch" data-c="void">🕳️<br>A SINGULARIDADE</button><button class="ch" data-c="lira">💇‍♀️<br>RAINHA<br>DOS FIOS</button><button class="ch" data-c="yan">👑<br>O ADAPTADOR</button><button class="ch" data-c="sensei">🦊<br>O MESTRE<br>DAS ARTES</button></div>
  <small id="info"></small>
  <div class="row"><button id="pvp">⚔ PVP ONLINE</button><button id="chb">🌀 CHAOS ONLINE</button><button id="tmb">👥 EQUIPES</button><button id="gfxm">✨ GRÁFICOS</button></div>
  <div class="row"><button id="play">🌊 ONDAS (OFFLINE)</button><button id="train">TREINO</button></div>
@@ -2056,6 +2056,115 @@ const EVT=(()=>{
  const _bg=CHAOS.bg;CHAOS.bg=function(){_bg.call(this);for(const e of EVT.act.values())if(AO(e))draw(e)};
  const _hd=CHAOS.hud;CHAOS.hud=function(){_hd.call(this);for(const e of EVT.act.values())if(AO(e))hud(e)};
 })();
+
+/* ===== SENSEI · O MESTRE DAS ARTES =====
+   Mestre dos 10 originais, parente muito distante da Neko, poder ligado a uma divindade raposa (Kitsune).
+   Tema: arte como poder sobrenatural — música, cinema, pintura e escultura (a raposa aparece na identidade visual,
+   não em todo golpe). Nada nos outros personagens foi alterado: tudo aqui está em CH.sensei e nas funções sen*.
+   Multiplayer: como os demais, cada aparelho reproduz o golpe de quem lançou (só usa p, G.enemies, hit, circle, FX…);
+   o que precisa ser igual em todos (posições, horários) é determinístico — nada de sorteio no gameplay.
+   A fruta do clã de Yan é só um desejo do personagem (texto), sem explicação definitiva e sem mecânica. */
+
+/* poça de tinta: causa dano em intervalos (tk) enquanto durar (T) */
+function senInk(x,y,r,T,dmg,tk,o){let n=.05;
+ FX.add(T,(f,dt)=>{n-=dt;if(n<=0){n=tk;circle(x,y,r,dmg,0,o)}},
+ f=>{const a=Math.min(1,(T-f.t)*2,f.t*5)*.85,k=f.t;X.save();X.globalAlpha=a;const g=X.createRadialGradient(x,y,2,x,y,r);g.addColorStop(0,'#12060b');g.addColorStop(.75,'#2a0c14');g.addColorStop(1,'#ff6b4a');X.fillStyle=g;X.beginPath();X.arc(x,y,r*(.9+.06*Math.sin(k*6)),0,6.3);X.fill();
+  X.fillStyle='#12060b';for(let i=0;i<5;i++){const q=i*1.26+x*.01;X.beginPath();X.arc(x+Math.cos(q)*r*.9,y+Math.sin(q)*r*.9,4+i%2*2,0,6.3);X.fill()}X.restore()})}
+
+/* NOTAS (música): leque de notas que atravessam os inimigos; a nota de pull puxa quem ela acertar até o Sensei.
+   aw: versão do Awakening (9 notas, marca "pintados" = +30% de dano recebido) */
+function senNotes(p,a,N,spread,dmg,pullK,aw){const ox=p.x,oy=p.y,notes=[];let s=0;
+ FX.add(1.1,(f,dt)=>{while(s<N&&f.t>s*.055){const o=N>1?(s/(N-1)-.5)*spread:0;notes.push({x:ox,y:oy,a:a+o,k:s,d:0,h:new Set()});s++}
+  for(const q of notes){if(q.d>400)continue;q.x+=Math.cos(q.a)*640*dt;q.y+=Math.sin(q.a)*640*dt;q.d+=640*dt;
+   for(const e of G.enemies)if(!q.h.has(e)&&Math.hypot(e.x-q.x,e.y-q.y)<e.r+14){q.h.add(e);hit(e,dmg,q.a,60,{slow:.4});if(aw)e.vulT=Math.max(e.vulT||0,G.tm+3);FX.ring(q.x,q.y,aw?'#ff4a3a':'#ffd9a0',26);
+    if(q.k===pullK){FX.add(.4,(g,d2)=>{if(!e.dead&&Math.hypot(e.x-p.x,e.y-p.y)>p.r+e.r+14)vpull(e,p.x,p.y,540,d2)})}}}},
+ f=>{X.save();X.textAlign='center';X.textBaseline='middle';if(N<=5){X.strokeStyle='rgba(255,217,160,'+Math.max(0,.45-f.t*.4)+')';X.lineWidth=1;const nx=-Math.sin(a),ny=Math.cos(a);X.beginPath();for(let i=-2;i<=2;i++){X.moveTo(ox+nx*i*7,oy+ny*i*7);X.lineTo(ox+nx*i*7+Math.cos(a)*400,oy+ny*i*7+Math.sin(a)*400)}X.stroke()}   // pauta musical
+  X.font='24px serif';for(const q of notes){if(q.d>400)continue;X.globalAlpha=1-q.d/460;X.fillStyle=aw?'#ff4a3a':'#ffe3b0';X.strokeStyle='#000';X.lineWidth=3;const t=q.k%2?'♪':'♫';X.strokeText(t,q.x,q.y);X.fillText(t,q.x,q.y)}X.restore()})}
+
+/* TAKE (cinema): marca o lugar, e "Corta!" — volta para a marca ferindo os dois pontos. aw: mais rápido, mais forte, deixa 2 dublês */
+function senTake(p,aw){const mx=p.x,my=p.y,T=aw?1.5:2;let d=0;FX.text(mx,my-40,'🎬 AÇÃO!','#fff',22,.7);
+ FX.add(T+.5,(f,dt)=>{if(!d&&f.t>=T){d=1;const cx=p.x,cy=p.y;circle(cx,cy,aw?95:75,aw?16:12,260,{st:.2});FX.ring(cx,cy,'#ffd9a0',aw?95:75);P.add(cx,cy,'#ffe3b0',12,240,.5,4);
+   p.x=mx;p.y=my;clampA(p);p.inv=Math.max(p.inv,.35);circle(p.x,p.y,aw?110:85,aw?26:18,320,{st:aw?.5:.35});FX.ring(p.x,p.y,aw?'#ff4a3a':'#fff',aw?110:85);FX.text(p.x,p.y-48,'CORTA!','#ffd23f',36,.7);G.shake=aw?12:8;Snd.sfx('boom');
+   if(aw)for(const o of[[-42,24],[42,-24]])G.clones.push({x:p.x+o[0],y:p.y+o[1],t:4,at:.2,k:1})}},   // dublês atacam sozinhos (sistema de clones existente)
+ f=>{const k=Math.min(1,f.t/T);X.save();X.translate(mx,my);X.globalAlpha=f.t>T?Math.max(0,1-(f.t-T)*2):1;X.strokeStyle=aw?'#ff4a3a':'#ffd9a0';X.lineWidth=3;X.beginPath();X.arc(0,0,26,-1.57,-1.57+6.28*k);X.stroke();X.setLineDash([5,6]);X.beginPath();X.arc(0,0,aw?110:85,0,6.3);X.stroke();X.setLineDash([]);
+  X.font='30px sans-serif';X.textAlign='center';X.textBaseline='middle';X.fillText('🎬',0,0);X.restore()})}
+
+/* MURAL (pintura): mural no chão — dano, lentidão e "pintados" (+30% de dano recebido). aw: grande e termina em explosão */
+function senMural(p,a,aw){const nn=IN.tc?nearest(p):null,D=IN.tc?(nn?clamp(dist(p,nn),90,260):180):clamp(Math.hypot(IN.mx-p.x,IN.my-p.y),80,260),x=clamp(p.x+Math.cos(a)*D,AR.x+60,AR.x+AR.w-60),y=clamp(p.y+Math.sin(a)*D,AR.y+60,AR.y+AR.h-60),R=aw?140:95,T=aw?5:4;let n=.05,fin=0;
+ FX.add(T+.3,(f,dt)=>{n-=dt;if(n<=0&&f.t<T){n=.4;circle(x,y,R,aw?8:5,0,{slow:.6});for(const e of G.enemies)if(Math.hypot(e.x-x,e.y-y)<R+e.r)e.vulT=Math.max(e.vulT||0,G.tm+3.2)}
+  if(aw&&!fin&&f.t>=T){fin=1;circle(x,y,R,40,600,{st:.4});FX.ring(x,y,'#ff4a3a',R);P.add(x,y,'#ff4a3a',16,300,.6,5);G.shake=12;Snd.sfx('boom')}},
+ f=>{const a2=Math.min(1,(T-f.t)*2,f.t*4)*.9;X.save();X.globalAlpha=a2;const g=X.createRadialGradient(x,y,4,x,y,R);g.addColorStop(0,'rgba(255,74,58,.55)');g.addColorStop(.7,'rgba(60,10,25,.45)');g.addColorStop(1,'rgba(255,217,160,.1)');X.fillStyle=g;X.beginPath();X.arc(x,y,R,0,6.3);X.fill();
+  X.lineCap='round';for(let i=0;i<5;i++){X.strokeStyle=i%2?'#ffd9a0':(aw?'#ff4a3a':'#c0392b');X.lineWidth=6;const q=f.t*.8+i*1.25;X.beginPath();X.arc(x,y,R*(.35+i*.12),q,q+1.6);X.stroke()}
+  X.strokeStyle='#ffd23f';X.lineWidth=3;X.strokeRect(x-R*.72,y-R*.72,R*1.44,R*1.44);X.restore()})}   // moldura de quadro
+
+/* ESTÁTUA (escultura): uma estátua de raposa de cada vez; pulsa e atordoa quem chega perto; quebra ao fim */
+function senStatue(p,a){const gen=p.stg=(p.stg||0)+1,x=clamp(p.x+Math.cos(a)*90,AR.x+40,AR.x+AR.w-40),y=clamp(p.y+Math.sin(a)*90,AR.y+40,AR.y+AR.h-40),T=6;let n=.4,pu=0;
+ FX.add(T,(f,dt)=>{if(p.stg!==gen){f.t=T;return}   // outra estátua foi criada: esta some
+  pu-=dt;n-=dt;if(n<=0){n=1.4;pu=.3;circle(x,y,120,10,200,{st:.35});FX.ring(x,y,'#ffd9a0',120);P.add(x,y,'#d8c9a8',8,200,.4,4)}
+  if(f.t>=T-.02){circle(x,y,140,22,500,{st:.3});FX.ring(x,y,'#ffd9a0',140);P.add(x,y,'#d8c9a8',18,300,.6,5);G.shake=8;Snd.sfx('boom')}},   // quebra e solta estilhaços
+ f=>{if(p.stg!==gen&&f.t<T-.05)return;X.save();X.translate(x,y);X.globalAlpha=Math.min(1,f.t*4,(T-f.t)*3);X.fillStyle='#0005';X.beginPath();X.ellipse(0,18,22,8,0,0,6.3);X.fill();X.fillStyle='#d8c9a8';X.strokeStyle='#4a3b2a';X.lineWidth=3;X.beginPath();X.arc(0,0,20,0,6.3);X.fill();X.stroke();
+  X.beginPath();for(const s of[-1,1]){X.moveTo(s*6,-14);X.lineTo(s*15,-32);X.lineTo(s*17,-10)}X.fill();X.stroke();X.fillStyle='#a33';X.beginPath();X.arc(-6,-2,3,0,6.3);X.arc(6,-2,3,0,6.3);X.fill();
+  if(pu>0){X.globalAlpha=pu/.3;X.strokeStyle='#ffd9a0';X.lineWidth=4;X.beginPath();X.arc(0,0,120*(1-pu/.3),0,6.3);X.stroke()}X.restore()})}
+
+/* ===== DOMÍNIO: GALERIA DA RAPOSA ETERNA (9 s) — a "obra em exibição" muda a cada 3 s ===== */
+function drGal(D){const f=dfade(D),t=G.tm,R=D.r;X.save();X.globalAlpha=f;let g=X.createRadialGradient(D.x,D.y,10,D.x,D.y,R);g.addColorStop(0,'rgba(50,8,16,.82)');g.addColorStop(.8,'rgba(20,4,10,.88)');g.addColorStop(1,'rgba(255,74,58,.35)');X.fillStyle=g;X.beginPath();X.arc(D.x,D.y,R,0,6.3);X.fill();
+ X.strokeStyle='#ffd23f';X.lineWidth=4;X.beginPath();X.arc(D.x,D.y,R,0,6.3);X.stroke();
+ for(let i=0;i<6;i++){const a=i*1.047+t*.1,x=D.x+Math.cos(a)*R*.86,y=D.y+Math.sin(a)*R*.86;X.save();X.translate(x,y);X.rotate(a+1.57);X.fillStyle='#1a0a0e';X.strokeStyle='#ffd23f';X.lineWidth=3;X.fillRect(-20,-14,40,28);X.strokeRect(-20,-14,40,28);X.font='16px sans-serif';X.textAlign='center';X.textBaseline='middle';X.fillText(['🎼','🎬','🎨','🗿','🦊','🏮'][i],0,1);X.restore()}   // quadros da galeria
+ const k=D.ph|0,col=['#ffd23f','#9fd4ff','#ff6b4a'][k],ap=Math.min(1,(t-(D.pt||t))*3);
+ X.globalAlpha=f*.9;X.lineWidth=3;X.strokeStyle=col;if(k===0){const b=D.bp?Math.max(0,1-(t-D.bp)*3):0;X.globalAlpha=f*b;X.beginPath();X.arc(D.x,D.y,R*(1-b),0,6.3);X.stroke();X.globalAlpha=f}   // batida
+ else if(k===1){X.globalAlpha=f*.35;X.fillStyle='#9fd4ff';for(let i=0;i<8;i++){const y=D.y-R+((t*60+i*R*.25)%(2*R));X.fillRect(D.x-R*.9,y,R*1.8,2)}X.globalAlpha=f}   // linhas de filme
+ else if(D.st){for(const s of D.st){const q=Math.max(0,s.t-t),a2=s.done?Math.max(0,1-(t-s.t)*2.5):1;if(a2<=0)continue;X.globalAlpha=f*a2;if(!s.done){X.fillStyle='rgba(255,106,74,'+(.12+.2*(1-q))+')';X.beginPath();X.arc(s.x,s.y,70,0,6.3);X.fill();X.strokeStyle='#fff';X.beginPath();X.arc(s.x,s.y,70,0,6.3);X.stroke()}X.font='34px sans-serif';X.textAlign='center';X.textBaseline='middle';X.fillText('🗿',s.x,s.y+(s.done?0:q*20))}X.globalAlpha=f}
+ X.fillStyle='#ffd9a0';X.globalAlpha=f*.16;X.font='bold 120px serif';X.textAlign='center';X.textBaseline='middle';X.fillText('狐',D.x,D.y);X.globalAlpha=f*ap;X.fillStyle=col;X.font='bold 20px sans-serif';X.fillText(['♪ SINFONIA','🎬 MATINÊ','🗿 VERNISSAGE'][k],D.x,D.y-R*.62);X.restore()}
+function dmSensei(p){const R=225,T=9,D=p.dom={x:p.x,y:p.y,r:R,t:T,T,type:'sn',ph:0,pt:G.tm,bp:0},ST=D.st=[];D.bar=barOpen(p,{x:p.x,y:p.y,r:R,col:'#ff4a3a',dom:D});D.dr=drGal;p.ill=Math.max(p.ill,2);
+ FX.ring(p.x,p.y,'#ff4a3a',R);FX.ring(p.x,p.y,'#ffd23f',R*.6);G.shake=10;G.flash=.6;G.hs=.12;FX.text(p.x,p.y-50,'GALERIA DA RAPOSA ETERNA','#ffd9a0',24,1.2);Snd.sfx('boom');
+ let ph=-1,bt=.5,w2=0;
+ FX.add(T+.4,(f,dt)=>{if(p.dom!==D||D.bar.broken){ST.length=0;f.t=T+.4;return}
+  const k=Math.min(2,Math.floor((T-D.t)/3));
+  if(k!==ph){ph=k;D.ph=k;D.pt=G.tm;bt=.3;w2=0;FX.ring(D.x,D.y,['#ffd23f','#9fd4ff','#ff6b4a'][k],R*.8);G.shake=6;P.add(D.x,D.y,['#ffd23f','#9fd4ff','#ff6b4a'][k],14,260,.6,4)}
+  if(k===0){bt-=dt;if(bt<=0){bt=.75;D.bp=G.tm;circle(D.x,D.y,R,5,160);P.add(D.x,D.y,'#ffd23f',8,300,.5,4)}}   // música: pulso em quem está dentro a cada batida
+  else if(k===1){for(const e of G.enemies)if(Math.hypot(e.x-D.x,e.y-D.y)<R+e.r){e.slw=Math.max(e.slw||0,.35);e.vulT=Math.max(e.vulT||0,G.tm+.5)}   // cinema: câmera lenta e vulneráveis
+   for(let i=0;i<4;i++)p.cd[i]=Math.max(0,p.cd[i]-dt*.5);   // filme acelerado: o Sensei recarrega 50% mais rápido
+   bt-=dt;if(bt<=0){bt=1;circle(D.x,D.y,R,5,0)}}
+  else{w2-=dt;if(w2<=0&&ST.length<6){const n=ST.length/3|0,base=n*.9+.5;for(let i=0;i<3;i++){const a=base+i*2.094,r=R*(n?.35:.6);ST.push({x:D.x+Math.cos(a)*r,y:D.y+Math.sin(a)*r,t:G.tm+1,done:0})}w2=1.5}   // escultura: estátuas surgem em lugares fixos e explodem depois de 1 s
+   for(const s of ST)if(!s.done&&G.tm>=s.t){s.done=1;circle(s.x,s.y,70,20,320,{st:.5});FX.ring(s.x,s.y,'#ff6b4a',70);P.add(s.x,s.y,'#d8c9a8',12,260,.5,4);G.shake=5}}})}
+
+/* ===== o personagem ===== */
+CH.sensei={n:'SENSEI',em:'🦊',col:'#ff6b4a',big:1.12,spd:1.05,awsp:1.25,awd:1.45,hp:150,sn:'O MESTRE DAS ARTES',awn:'KITSUNE CARMESIM',
+ info:'O MESTRE DAS ARTES — Mestre dos 10 originais, parente distante da Neko, ligado a uma divindade raposa (e de olho em uma fruta do clã de Yan). Controle + combos + áreas, com a arte como poder: música, cinema, pintura e escultura. M1 Pincelada (o 5º golpe pinta uma poça de tinta) · [1] Nota Sagrada (leque de notas; a última puxa o inimigo) · [2] Take Dois (marca o lugar; "Corta!" volta para lá ferindo os dois pontos) · [3] Mural de Tinta (dano, lentidão e "pintados" levam +30% de dano) · [4] Estátua Kitsune (uma de cada vez; pulsa e atordoa por pouco tempo). Awakening KITSUNE CARMESIM: aura vermelha, nove caudas e golpes transformados: Sinfonia das Nove Caudas · Último Take (com dublês) · Obra-Prima Carmesim · DOMÍNIO Galeria da Raposa Eterna (9 s, com BARREIRA que prende quem está dentro e pode ser destruída): a obra em exibição muda a cada 3 s (Sinfonia, Matinê, Vernissage).',
+ m1(p){const c=p.combo++%5,a=p.ang,aw=p.aw>0,R=(aw?72:58)*p.sc;p.ct=1;p.atk=.22;arc(p,a,R,1,[5,5,6,6,9][c],c==4?200:50);p.x+=Math.cos(a)*7;p.y+=Math.sin(a)*7;
+  const ax=p.x+Math.cos(a)*R*.7,ay=p.y+Math.sin(a)*R*.7;if(c==4){senInk(ax,ay,46,2.4,5,.5,{slow:.4});FX.ring(ax,ay,'#ff6b4a',60);G.shake=4}
+  FX.add(.22,null,f=>{X.save();X.globalAlpha=1-f.t/f.d;X.lineCap='round';X.strokeStyle=aw?'#ff2d1a':'#1a0d12';X.lineWidth=aw?9:8;X.beginPath();X.arc(p.x,p.y,R*.8,a-.9+(c%2)*.2,a+.9+(c%2)*.2);X.stroke();X.strokeStyle=aw?'#ffd23f':'#ffd9a0';X.lineWidth=2;X.stroke();X.restore()})},   // pincelada de tinta
+ sk:[
+  {n:'Nota Sagrada',cd:6,f(p,a){senNotes(p,a,5,.5,7,4,false)}},
+  {n:'Take Dois',cd:8,f(p,a){senTake(p,false)}},
+  {n:'Mural de Tinta',cd:9,f(p,a){senMural(p,a,false)}},
+  {n:'Estátua Kitsune',cd:12,f(p,a){senStatue(p,a)}}],
+ aw:[
+  {n:'SINFONIA DAS NOVE CAUDAS',cd:6,f(p,a){senNotes(p,a,9,1.5,7,4,true)}},
+  {n:'ÚLTIMO TAKE',cd:8,f(p,a){senTake(p,true)}},
+  {n:'OBRA-PRIMA CARMESIM',cd:10,f(p,a){senMural(p,a,true)}},
+  {n:'DOMÍNIO: GALERIA DA RAPOSA ETERNA',cd:20,f(p){dmSensei(p)}}],
+ afx(p){let tk=0;FX.ring(p.x,p.y,'#ff2d1a',220);FX.ring(p.x,p.y,'#ffd23f',120);   // chegada do Awakening: onda vermelha
+  FX.add(9999,(f,dt)=>{if(!(p.aw>0)){f.t=1e9;return}tk-=dt;if(tk<=0){tk=.07;P.add(p.x+rnd(-12,12)*p.sc,p.y+rnd(-8,8)*p.sc,Math.random()<.6?'#ff3b30':'#ffd23f',1,80,.8,4)}},   // brasas de raposa
+   f=>{if(!(p.aw>0))return;X.save();X.globalCompositeOperation='lighter';const R=70*p.sc,g=X.createRadialGradient(p.x,p.y,4,p.x,p.y,R);g.addColorStop(0,'rgba(255,40,20,.45)');g.addColorStop(1,'rgba(255,40,20,0)');X.fillStyle=g;X.beginPath();X.arc(p.x,p.y,R,0,6.3);X.fill();X.restore()})}};
+ATYPE.sensei='energia';BR.sensei=150;
+
+/* desenho do Sensei: kimono, máscara de raposa, pincel; no Awakening, nove caudas vermelhas */
+function SENSEI(p){const aw=p.aw>0,t=G.tm;X.save();X.rotate(p.ang+Math.PI);const n=aw?9:1;X.lineCap='round';
+ for(let i=0;i<n;i++){const o=n>1?(i-4)*.3:0,w=Math.sin(t*(aw?7:4)+i)*.25;X.strokeStyle=aw?(i%2?'#ff2d1a':'#ff7a3c'):'#e8b36a';X.lineWidth=aw?7:9;X.beginPath();X.moveTo(8,0);X.quadraticCurveTo(26,Math.sin(o)*30+w*20,40,Math.sin(o)*46+w*30);X.stroke();if(!aw){X.strokeStyle='#fff';X.lineWidth=5;X.beginPath();X.moveTo(32,Math.sin(o)*30+w*20);X.lineTo(40,Math.sin(o)*46+w*30);X.stroke()}}   // cauda(s)
+ X.restore();
+ X.fillStyle=aw?'#7a0e18':'#f3e9d2';X.strokeStyle='#2a0a10';X.lineWidth=2;X.beginPath();X.arc(0,0,15,0,6.3);X.fill();X.stroke();   // kimono
+ X.strokeStyle=aw?'#ffd23f':'#c0392b';X.lineWidth=4;X.beginPath();X.arc(0,0,13,.4,2.4);X.stroke();   // faixa
+ X.save();X.rotate(p.ang);X.fillStyle=aw?'#ff4a3a':'#f6f0e4';X.strokeStyle='#2a0a10';X.lineWidth=2;X.beginPath();for(const s of[-1,1]){X.moveTo(5,s*8);X.lineTo(13,s*20);X.lineTo(-2,s*13)}X.fill();X.stroke();   // orelhas
+ X.fillStyle='#fff';X.beginPath();X.arc(7,0,9,-1.2,1.2);X.fill();X.fillStyle=aw?'#ffd23f':'#c0392b';X.beginPath();X.arc(9,-4,2.4,0,6.3);X.arc(9,4,2.4,0,6.3);X.fill();   // máscara e olhos
+ X.strokeStyle='#c0392b';X.lineWidth=1.5;X.beginPath();X.moveTo(11,-7);X.lineTo(15,-9);X.moveTo(11,7);X.lineTo(15,9);X.stroke();
+ X.strokeStyle='#3a2a1a';X.lineWidth=3;X.beginPath();X.moveTo(-2,12);X.lineTo(14,24);X.stroke();X.strokeStyle=aw?'#ff2d1a':'#c0392b';X.lineWidth=4;X.beginPath();X.moveTo(14,24);X.lineTo(19,27);X.stroke();X.restore()}   // pincel
+const _senDraw=Player.prototype.draw;
+Player.prototype.draw=function(){if(this.d!==CH.sensei)return _senDraw.call(this);if(this.van>0)return;const aw=this.aw>0;X.save();X.translate(this.x,this.y);X.fillStyle='#0006';X.beginPath();X.ellipse(0,this.r*.8,this.r,this.r*.4,0,0,6.3);X.fill();
+ {const R0=(aw?50:32)*this.sc,g=X.createRadialGradient(0,0,2,0,0,R0);g.addColorStop(0,this.d.col+(aw?'99':'44'));g.addColorStop(1,this.d.col+'00');X.globalCompositeOperation='lighter';X.fillStyle=g;X.beginPath();X.arc(0,0,R0,0,6.3);X.fill();X.globalCompositeOperation='source-over'}
+ if((this.inv>0&&((G.tm*20)|0)%2)||this.ill>0)X.globalAlpha=.55;X.scale(this.sc,this.sc);
+ if(aw){X.strokeStyle='#ff2d1a';X.lineWidth=3;X.beginPath();X.arc(0,0,24+Math.sin(G.tm*10)*2,0,6.3);X.stroke()}
+ SENSEI(this);X.restore();X.font='16px sans-serif';X.textAlign='center';X.fillText(this.d.em,this.x,this.y-this.r-14)};
 
 let last=0;function loop(t){const dt=Math.min(.05,(t-last)/1000||0);last=t;if(G.run&&!G.paused&&!(IN.tc&&innerHeight>innerWidth))G.update(dt);G.draw();requestAnimationFrame(loop)}
 UI.menu();requestAnimationFrame(loop);
